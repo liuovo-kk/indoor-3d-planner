@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import { useTexture } from '@react-three/drei';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import useStore from '../store/useStore';
 
 // 🌟 TypeScript 接口定义：强制规定传给 RoomBase 的 props 格式
 interface RoomBaseProps {
@@ -10,13 +9,9 @@ interface RoomBaseProps {
 }
 
 export default function RoomBase({ onFloorClick }: RoomBaseProps) {
-  // 获取当前的视图模式
-  const viewMode = useStore((state) => state.viewMode);
-
   const roomWidth = 6;
   const roomDepth = 6;
-  const wallHeight = 2.5;
-  const thickness = 0.1;
+  const wallHeight = 2.8;
   // const baseboardHeight = 0.1;
 
   const baseTexture = useTexture('/assets/img/wood_floor.jpg');
@@ -29,21 +24,16 @@ export default function RoomBase({ onFloorClick }: RoomBaseProps) {
     return cloned;
   }, [baseTexture]);
 
-  // 相机在哪边看，哪边的墙就消失
-  const showLeftWall = viewMode !== 'left';
-  const showRightWall = viewMode !== 'right' && viewMode !== 'dollhouse';
-  const showBackWall = viewMode !== 'back';
-  const showFrontWall = viewMode !== 'front' && viewMode !== 'dollhouse';
-
   return (
     <group>
       {/* 地板 */}
       <mesh
-        position={[0, -thickness / 2, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0, 0]}
         onClick={onFloorClick}
         receiveShadow
       >
-        <boxGeometry args={[roomWidth, thickness, roomDepth]} />
+        <planeGeometry args={[roomWidth, roomDepth]} />
         <meshStandardMaterial
           map={floorTexture}
           color="#bbb2ac"
@@ -51,50 +41,53 @@ export default function RoomBase({ onFloorClick }: RoomBaseProps) {
         />
       </mesh>
 
+      {/* ========================================== */}
+      {/* 👇 🌟 新增：会隐身的屋顶 */}
+      {/* 我们用一个 Plane (平面) 即可，放在墙的高度上 */}
+      <mesh
+        position={[0, wallHeight, 0]}
+        rotation={[Math.PI / 2, 0, 0]} // 让它平躺
+        receiveShadow // 接受灯光投影
+      >
+        {/* 长宽参考房间尺寸 */}
+        <planeGeometry args={[roomWidth, roomDepth]} />
+
+        <meshStandardMaterial
+          color="#eeeeee" // 屋顶颜色浅一点
+          roughness={1}
+        />
+      </mesh>
+
       {/* 左墙 */}
       <mesh
-        position={[-roomWidth / 2 - thickness / 2, wallHeight / 2, 0]}
-        visible={showLeftWall} // 动态显隐
-        receiveShadow
-        castShadow
+        position={[-roomWidth / 2, wallHeight / 2, 0]}
+        rotation={[0, Math.PI / 2, 0]}
       >
-        <boxGeometry args={[thickness, wallHeight, roomDepth]} />
+        <planeGeometry args={[roomDepth, wallHeight]} />
         <meshStandardMaterial color="#c7ae94" roughness={1} />
       </mesh>
 
       {/* 2. 右墙 (+X 轴方向) */}
       <mesh
-        position={[roomWidth / 2 + thickness / 2, wallHeight / 2, 0]}
-        visible={showRightWall} // 动态显隐
-        receiveShadow
-        // 💡 提示：这里去掉了 castShadow，防止封闭的四面墙把房间内的光线彻底挡死
+        position={[roomWidth / 2, wallHeight / 2, 0]}
+        rotation={[0, -Math.PI / 2, 0]}
       >
-        <boxGeometry args={[thickness, wallHeight, roomDepth]} />
+        <planeGeometry args={[roomDepth, wallHeight]} />
         <meshStandardMaterial color="#c7ae94" roughness={1} />
       </mesh>
 
       {/* 后墙 */}
-      <mesh
-        position={[0, wallHeight / 2, -roomDepth / 2 - thickness / 2]}
-        visible={showBackWall} // 动态显隐
-        receiveShadow
-        castShadow
-      >
-        <boxGeometry
-          args={[roomWidth + thickness * 2, wallHeight, thickness]}
-        />
-        <meshStandardMaterial color="#b8a595" roughness={1} />
+      <mesh position={[0, wallHeight / 2, -roomDepth / 2]}>
+        <planeGeometry args={[roomWidth, wallHeight]} />
+        <meshStandardMaterial color="#c3ac93" roughness={1} />
       </mesh>
 
       {/* 4. 前墙 (+Z 轴方向) */}
       <mesh
-        position={[0, wallHeight / 2, roomDepth / 2 + thickness / 2]}
-        visible={showFrontWall} // 动态显隐
-        receiveShadow
+        position={[0, wallHeight / 2, roomDepth / 2]}
+        rotation={[0, Math.PI, 0]}
       >
-        <boxGeometry
-          args={[roomWidth + thickness * 2, wallHeight, thickness]}
-        />
+        <planeGeometry args={[roomWidth, wallHeight]} />
         <meshStandardMaterial color="#b8a595" roughness={1} />
       </mesh>
 

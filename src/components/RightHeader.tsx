@@ -15,7 +15,7 @@ export default function RightHeader() {
 
   return (
     <header
-      className={`h-16 bg-white border-b border-gray-100 flex items-center justify-between flex-shrink-0 z-30 relative transition-all duration-300 ${isSidebarOpen ? 'px-6' : 'pr-6 pl-14'}`}
+      className={`h-16 bg-white border-b border-gray-100 flex items-center justify-between shrink-0 z-30 relative transition-all duration-300 ${isSidebarOpen ? 'px-6' : 'pr-6 pl-14'}`}
     >
       <button
         onClick={toggleSidebar}

@@ -5,6 +5,7 @@ import useStore from '../store/useStore';
 import RoomBase from './RoomBase';
 import CameraRig from './CameraRig';
 import DraggableFurniture from './DraggableFurniture';
+import * as THREE from 'three';
 
 export default function RoomScene() {
   // 从 Store 获取 3D 场景需要的数据和方法
@@ -43,7 +44,12 @@ export default function RoomScene() {
 
       <OrbitControls
         makeDefault
-        maxPolarAngle={Math.PI / 2 - 0.05}
+        mouseButtons={{
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN,
+        }}
+        maxPolarAngle={Math.PI / 2 + 0.1}
         minDistance={3}
         maxDistance={24}
         enabled={!isDragging}

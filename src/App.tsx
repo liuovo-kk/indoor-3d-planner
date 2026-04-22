@@ -1,5 +1,5 @@
 // src/App.tsx
-import Sidebar from './components/Sidebar';
+import Sidebar from './components/sidebar/Sidebar';
 import RightHeader from './components/RightHeader';
 import Toolbar from './components/Toolbar';
 import RoomScene from './scene/RoomScene';
