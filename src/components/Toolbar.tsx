@@ -1,8 +1,6 @@
 // src/components/Toolbar.tsx
 import React from 'react';
 import {
-  Plus,
-  Minus,
   Box,
   PanelsTopLeft,
   FolderKanban,
@@ -54,16 +52,6 @@ export default function Toolbar() {
   ];
   return (
     <>
-      {/* 🌟 2. 右侧缩放控制：绝对定位、背景白、圆角、阴影，一行 class 搞定！ */}
-      <div className="absolute top-6 right-6 bg-white rounded-3xl flex flex-col shadow-sm overflow-hidden z-10">
-        <button className="p-3 border-b border-gray-100 hover:bg-gray-50 flex justify-center items-center">
-          <Plus size={20} color="#111" strokeWidth={2.5} />
-        </button>
-        <button className="p-3 hover:bg-gray-50 flex justify-center items-center">
-          <Minus size={20} color="#111" strokeWidth={2.5} />
-        </button>
-      </div>
-
       {/* 底部悬浮操作栏 */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
         {/* 弹出菜单 */}
@@ -117,7 +105,7 @@ export default function Toolbar() {
           />
 
           {/* 分割线 */}
-          <div className="w-[1px] h-5 bg-gray-200 mx-2"></div>
+          <div className="w-px h-5 bg-gray-200 mx-2"></div>
 
           <ToolbarButton
             icon={<Footprints size={18} color="#ccc" strokeWidth={2.5} />}

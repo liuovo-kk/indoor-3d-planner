@@ -58,7 +58,7 @@ export default function RightHeader() {
         {/* 价格与按钮 */}
         <div className="flex items-center gap-4 border-l border-gray-200 pl-6">
           {/* <span className="font-bold text-lg">$79.99</span> */}
-          <button className="flex items-center gap-2 bg-[#0058a3] text-white border-none rounded-full px-6 py-2.5 font-bold cursor-pointer transition-colors hover:bg-blue-700 whitespace-nowrap text-base">
+          <button className="flex items-center gap-2 bg-[#6c6c6c] text-white border-none rounded-full px-6 py-2.5 font-bold cursor-pointer transition-colors hover:bg-[#0058a3] whitespace-nowrap text-base">
             Summary
             <ArrowRight size={18} strokeWidth={2.5} />
           </button>

@@ -1,22 +1,24 @@
 import { useRef, useState, useCallback } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useDrag } from '@use-gesture/react';
-import { useCursor } from '@react-three/drei';
+import { useCursor, Edges } from '@react-three/drei';
 import * as THREE from 'three';
 import useStore from '../store/useStore';
 import AsyncModel from './AsyncModel';
 
-// 🌟 核心数学魔法：在空间中创建一个高度 Y=0 的“隐形数学地板”
+// 在空间中创建一个高度 Y=0 的“隐形数学地板”
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 interface DraggableFurnitureProps {
   initialPosition?: [number, number, number];
+  rotation?: [number, number, number];
   instanceId: string;
   model_id: string;
 }
 
 export default function DraggableFurniture({
   initialPosition = [0, 0, 0],
+  rotation = [0, 0, 0],
   instanceId,
   model_id,
 }: DraggableFurnitureProps) {
@@ -42,6 +44,12 @@ export default function DraggableFurniture({
   // 极致细节：鼠标悬浮变成小手，拖拽变成抓紧
   useCursor(hovered, 'grab', 'auto');
   useCursor(dragging, 'grabbing', 'auto');
+
+  const selectedItemId = useStore((state) => state.selectedItemId);
+  const setSelectedItemId = useStore((state) => state.setSelectedItemId);
+
+  // 判断自己是否被选中
+  const isSelected = selectedItemId === instanceId;
 
   // 🌟 修复：用 useCallback 缓存回调函数，切断父子组件间的无效渲染链条
   const handleModelLoad = useCallback(
@@ -127,7 +135,15 @@ export default function DraggableFurniture({
   });
 
   return (
-    <group ref={groupRef} position={initialPosition}>
+    <group
+      ref={groupRef}
+      position={initialPosition}
+      rotation={rotation}
+      onClick={(e) => {
+        e.stopPropagation(); // 关键！防止点家具时触发地板的点击
+        setSelectedItemId(instanceId);
+      }}
+    >
       {/* 🌟 传入 onLoadSize 接收测量结果 */}
       <AsyncModel modelId={model_id} onLoadSize={handleModelLoad} />
 
@@ -145,6 +161,15 @@ export default function DraggableFurniture({
         {/* 🌟 大小完全与真实模型保持一致！ */}
         <boxGeometry args={[modelSize[0], modelSize[1], modelSize[2]]} />
         <meshBasicMaterial transparent opacity={0} />
+
+        {/* 当被选中时，给这个碰撞盒描边！ */}
+        {isSelected && (
+          <Edges
+            linewidth={1} // 线条宽度
+            color="white"
+            //scale={1.02} // 💡 稍微放大一点点(1.02倍)，让框框包裹在模型外面，呼吸感更好
+          />
+        )}
       </mesh>
     </group>
   );
