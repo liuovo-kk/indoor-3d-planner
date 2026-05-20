@@ -9,6 +9,11 @@ export default function AddPanel() {
   const setFurnitureList = useStore((state) => state.setFurnitureList);
   const addPlacedItem = useStore((state) => state.addPlacedItem);
 
+  const setActiveSidebarTab = useStore((state) => state.setActiveSidebarTab);
+  const setCurrentRecommendItem = useStore(
+    (state) => state.setCurrentRecommendItem,
+  );
+
   const handleSelectAndPlace = (item: FurnitureData) => {
     const newItem = {
       ...item,
@@ -20,6 +25,10 @@ export default function AddPanel() {
       ],
     };
     addPlacedItem(newItem);
+
+    // 🌟 2. 新增逻辑：设置当前推荐项，并跳转 Tab
+    setCurrentRecommendItem(item);
+    setActiveSidebarTab('recommend');
   };
 
   // --- 无限滚动状态 ---
@@ -85,6 +94,12 @@ export default function AddPanel() {
           </span>
           <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
             Sofas
+          </span>
+          <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
+            Lamps
+          </span>
+          <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
+            beds
           </span>
         </div>
       </div>

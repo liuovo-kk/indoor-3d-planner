@@ -1,13 +1,14 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useDrag } from '@use-gesture/react';
-import { useCursor, Edges } from '@react-three/drei';
+import { useCursor, Edges, Line, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import useStore from '../store/useStore';
 import AsyncModel from './AsyncModel';
 
-// 在空间中创建一个高度 Y=0 的“隐形数学地板”
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const ROOM_SIZE = 6; // 房间长宽
+const ROOM_HALF = ROOM_SIZE / 2;
 
 interface DraggableFurnitureProps {
   initialPosition?: [number, number, number];
@@ -25,40 +26,50 @@ export default function DraggableFurniture({
   const groupRef = useRef<THREE.Group>(null);
   const { raycaster } = useThree();
 
-  // UI 状态反馈
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [hoverRotate, setHoverRotate] = useState(false); // 旋转手柄的悬浮状态
+  const [draggingRotate, setDraggingRotate] = useState(false); // 是否正在旋转
 
-  // 🌟 终极魔法 1：用来记录当前模型的真实尺寸 (长宽高)
   const [modelSize, setModelSize] = useState<[number, number, number]>([
     1, 1, 1,
   ]);
-  // 🌟 终极魔法 2：用来记录鼠标点下去那瞬间的“抓取偏移量”
   const dragOffset = useRef({ x: 0, z: 0 });
+
+  // 🌟 局部状态：分别驱动“移动”和“旋转”的丝滑渲染
+  const [livePos, setLivePos] =
+    useState<[number, number, number]>(initialPosition);
+  const [liveRotY, setLiveRotY] = useState<number>(rotation[1] || 0);
+
+  // 当外部数据源更新时同步
+  useEffect(() => {
+    setLivePos(initialPosition);
+  }, [initialPosition]);
+  useEffect(() => {
+    setLiveRotY(rotation[1] || 0);
+  }, [rotation[1]]);
 
   const setIsDragging = useStore((state) => state.setIsDragging);
   const updateItemPosition = useStore((state) => state.updateItemPosition);
   const updateItemSize = useStore((state) => state.updateItemSize);
+  const updateItemRotation = useStore((state) => state.updateItemRotation);
   const placedItems = useStore((state) => state.placedItems);
-
-  // 极致细节：鼠标悬浮变成小手，拖拽变成抓紧
-  useCursor(hovered, 'grab', 'auto');
-  useCursor(dragging, 'grabbing', 'auto');
-
   const selectedItemId = useStore((state) => state.selectedItemId);
   const setSelectedItemId = useStore((state) => state.setSelectedItemId);
 
-  // 判断自己是否被选中
   const isSelected = selectedItemId === instanceId;
 
-  // 🌟 修复：用 useCallback 缓存回调函数，切断父子组件间的无效渲染链条
+  useCursor(hovered, 'grab', 'auto');
+  useCursor(dragging, 'grabbing', 'auto');
+  useCursor(hoverRotate, 'pointer', 'auto');
+
   const handleModelLoad = useCallback(
     (size: [number, number, number]) => {
       setModelSize(size);
       updateItemSize(instanceId, size);
     },
     [instanceId, updateItemSize],
-  ); // 依赖项
+  );
 
   const bind = useDrag(({ active, event, first }) => {
     setDragging(active);
@@ -70,7 +81,6 @@ export default function DraggableFurniture({
       raycaster.ray.intersectPlane(floorPlane, intersection);
 
       if (intersection) {
-        // 🌟 计算偏移量：只有在刚点下去的瞬间 (first) 才计算！
         if (first) {
           dragOffset.current = {
             x: groupRef.current.position.x - intersection.x,
@@ -78,76 +88,111 @@ export default function DraggableFurniture({
           };
         }
 
-        // 🌟 加上偏移量，实现真正的“指哪抓哪”
         let targetX = intersection.x + dragOffset.current.x;
         let targetZ = intersection.z + dragOffset.current.z;
 
-        // ================= 终极魔法 3.1：动态防穿墙钳制 =================
-        const ROOM_SIZE = 6; // 房间长宽
+        // 计算世界对齐的包围盒 (防穿模)
+        const rotY = rotation[1] || 0;
+        const wX =
+          Math.abs(Math.cos(rotY) * modelSize[0]) +
+          Math.abs(Math.sin(rotY) * modelSize[2]);
+        const wZ =
+          Math.abs(Math.sin(rotY) * modelSize[0]) +
+          Math.abs(Math.cos(rotY) * modelSize[2]);
 
-        // 右侧/前方 (正轴)：边界就是地板的一半
-        const maxBoundX = ROOM_SIZE / 2 - modelSize[0] / 2;
-        const maxBoundZ = ROOM_SIZE / 2 - modelSize[2] / 2;
+        const maxBoundX = ROOM_HALF - wX / 2;
+        const maxBoundZ = ROOM_HALF - wZ / 2;
+        const minBoundX = -(ROOM_HALF - wX / 2);
+        const minBoundZ = -(ROOM_HALF - wZ / 2);
 
-        // 左侧/后方 (负轴，有墙的一边)：
-        // 边界 = 地板的一半 - 踢脚线厚度(约0.04) - 甚至可以多留一点余量防止穿模
-        const minBoundX = -(ROOM_SIZE / 2 - modelSize[0] / 2);
-        const minBoundZ = -(ROOM_SIZE / 2 - modelSize[2] / 2);
-
-        // 使用不同的变量分别限制正负方向
         targetX = THREE.MathUtils.clamp(targetX, minBoundX + 0.05, maxBoundX);
         targetZ = THREE.MathUtils.clamp(targetZ, minBoundZ + 0.05, maxBoundZ);
 
-        // ================= 终极魔法 3.2：AABB 碰撞检测 =================
         let isColliding = false;
-
         for (const other of placedItems) {
-          if (other.instanceId === instanceId) continue; // 忽略自己
-          if (!other.size) continue; // 如果那个家具还没加载完尺寸，先跳过
+          if (other.instanceId === instanceId || !other.size) continue;
 
-          const [ox, oy, oz] = other.position;
-          const [ow, oh, od] = other.size;
+          const oRotY = other.rotation ? other.rotation[1] : 0;
+          const oWx =
+            Math.abs(Math.cos(oRotY) * other.size[0]) +
+            Math.abs(Math.sin(oRotY) * other.size[2]);
+          const oWz =
+            Math.abs(Math.sin(oRotY) * other.size[0]) +
+            Math.abs(Math.cos(oRotY) * other.size[2]);
 
-          const gapX = Math.abs(targetX - ox);
-          const gapZ = Math.abs(targetZ - oz);
+          const gapX = Math.abs(targetX - other.position[0]);
+          const gapZ = Math.abs(targetZ - other.position[2]);
 
-          // 核心算法：X 距离小于两者宽度一半之和，且 Z 距离小于两者深度一半之和 => 撞车了！
-          if (
-            gapX < (modelSize[0] + ow) / 2 &&
-            gapZ < (modelSize[2] + od) / 2
-          ) {
+          if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
             isColliding = true;
             break;
           }
         }
 
-        // 🌟 只有在没撞车的情况下，才允许模型移动！
         if (!isColliding) {
           groupRef.current.position.x = targetX;
           groupRef.current.position.z = targetZ;
+          setLivePos([targetX, initialPosition[1], targetZ]);
         }
       }
     } else if (!active && groupRef.current) {
-      // 拖拽结束：同步坐标到 Zustand Store
       const { x, y, z } = groupRef.current.position;
       updateItemPosition(instanceId, [x, y, z]);
     }
   });
 
+  // ================= 🌟 2. 自由旋转拖拽逻辑 (核心魔法) =================
+  const bindRotate = useDrag(({ active, event }) => {
+    event.stopPropagation(); // 阻止触发平移
+    setIsDragging(active);
+    setDraggingRotate(active);
+
+    if (active && groupRef.current) {
+      const intersection = new THREE.Vector3();
+      raycaster.ray.intersectPlane(floorPlane, intersection);
+
+      if (intersection) {
+        // 计算鼠标当前位置与家具中心点的 X 和 Z 差值
+        const dx = intersection.x - groupRef.current.position.x;
+        const dz = intersection.z - groupRef.current.position.z;
+
+        // 核心公式：利用反正切求出鼠标围绕家具的精确弧度
+        const angle = Math.atan2(dx, dz);
+
+        // 实时更新局部状态，画面立刻响应
+        setLiveRotY(angle);
+      }
+    } else if (!active && groupRef.current) {
+      // 鼠标松开时，将最终的旋转角度持久化到 Zustand
+      updateItemRotation(instanceId, [rotation[0], liveRotY, rotation[2]]);
+    }
+  });
+
+  // 动态尺寸线数学计算 (依据实时的 liveRotY 计算动态包围盒 wX 和 wZ)
+  const wX =
+    Math.abs(Math.cos(liveRotY) * modelSize[0]) +
+    Math.abs(Math.sin(liveRotY) * modelSize[2]);
+  const wZ =
+    Math.abs(Math.sin(liveRotY) * modelSize[0]) +
+    Math.abs(Math.cos(liveRotY) * modelSize[2]);
+
+  const distLeft = livePos[0] - wX / 2 - -ROOM_HALF;
+  const distRight = ROOM_HALF - (livePos[0] + wX / 2);
+  const distBack = livePos[2] - wZ / 2 - -ROOM_HALF;
+  const distFront = ROOM_HALF - (livePos[2] + wZ / 2);
+
   return (
     <group
       ref={groupRef}
       position={initialPosition}
-      rotation={rotation}
+      rotation={[rotation[0], liveRotY, rotation[2]]}
       onClick={(e) => {
-        e.stopPropagation(); // 关键！防止点家具时触发地板的点击
+        e.stopPropagation();
         setSelectedItemId(instanceId);
       }}
     >
-      {/* 🌟 传入 onLoadSize 接收测量结果 */}
       <AsyncModel modelId={model_id} onLoadSize={handleModelLoad} />
 
-      {/* 🌟 隐形碰撞盒 */}
       <mesh
         {...(bind() as any)}
         onPointerOver={(e) => {
@@ -155,22 +200,129 @@ export default function DraggableFurniture({
           setHovered(true);
         }}
         onPointerOut={() => setHovered(false)}
-        // 把碰撞盒往上抬模型高度的一半，这样刚好包裹住模型全身
         position={[0, modelSize[1] / 2, 0]}
       >
-        {/* 🌟 大小完全与真实模型保持一致！ */}
         <boxGeometry args={[modelSize[0], modelSize[1], modelSize[2]]} />
         <meshBasicMaterial transparent opacity={0} />
-
-        {/* 当被选中时，给这个碰撞盒描边！ */}
-        {isSelected && (
-          <Edges
-            linewidth={1} // 线条宽度
-            color="white"
-            //scale={1.02} // 💡 稍微放大一点点(1.02倍)，让框框包裹在模型外面，呼吸感更好
-          />
-        )}
+        {isSelected && <Edges linewidth={1} color="white" />}
       </mesh>
+
+      {/* ================= 🌟 3. 自由旋转 UI 控制手柄 ================= */}
+      {isSelected && (
+        <group>
+          {/* 连着手柄的线：从家具正前方往外伸 0.6米 */}
+          <Line
+            points={[
+              [0, 0.1, modelSize[2] / 2],
+              [0, 0.1, modelSize[2] / 2 + 0.4],
+            ]}
+            color="white"
+            lineWidth={1.5}
+          />
+          {/* 拖拽手柄圆盘 */}
+          <mesh
+            position={[0, 0.1, modelSize[2] / 2 + 0.4]}
+            {...(bindRotate() as any)}
+            onPointerOver={(e) => {
+              e.stopPropagation();
+              setHoverRotate(true);
+            }}
+            onPointerOut={(e) => {
+              e.stopPropagation();
+              setHoverRotate(false);
+            }}
+          >
+            <cylinderGeometry args={[0.15, 0.15, 0.05, 32]} />
+            <meshBasicMaterial
+              color={hoverRotate || draggingRotate ? '#888888' : 'white'}
+            />
+          </mesh>
+        </group>
+      )}
+
+      {/* ================= 🌟 动态尺寸线渲染层 ================= */}
+      {isSelected && (
+        //反向旋转抵消 liveRotY，让标尺线永远平行于房间墙壁
+        <group rotation={[0, -liveRotY, 0]}>
+          {/* 1. 左侧：一条完美的连续实/虚线从家具边缘连到墙壁 */}
+          <Line
+            points={[
+              [-wX / 2, 0.1, 0],
+              [-wX / 2 - distLeft, 0.1, 0],
+            ]}
+            color="#ffffff"
+            lineWidth={1.5}
+          />
+          {/* 纯文本数字：无背景框，加了 text-shadow 确保穿线时依然清晰 */}
+          <Html
+            position={[-wX / 2 - distLeft / 2, 0.15, 0]}
+            center
+            zIndexRange={[100, 0]}
+          >
+            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+              {distLeft.toFixed(2)} m
+            </div>
+          </Html>
+
+          {/* 2. 右侧线与文本 */}
+          <Line
+            points={[
+              [wX / 2, 0.1, 0],
+              [wX / 2 + distRight, 0.1, 0],
+            ]}
+            color="#ffffff"
+            lineWidth={1.5}
+          />
+          <Html
+            position={[wX / 2 + distRight / 2, 0.15, 0]}
+            center
+            zIndexRange={[100, 0]}
+          >
+            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+              {distRight.toFixed(2)} m
+            </div>
+          </Html>
+
+          {/* 3. 后侧线与文本 */}
+          <Line
+            points={[
+              [0, 0.1, -wZ / 2],
+              [0, 0.1, -wZ / 2 - distBack],
+            ]}
+            color="#ffffff"
+            lineWidth={1.5}
+          />
+          <Html
+            position={[0, 0.15, -wZ / 2 - distBack / 2]}
+            center
+            zIndexRange={[100, 0]}
+          >
+            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+              {' '}
+              {distBack.toFixed(2)} m
+            </div>
+          </Html>
+
+          {/* 4. 前侧线与文本 */}
+          <Line
+            points={[
+              [0, 0.1, wZ / 2],
+              [0, 0.1, wZ / 2 + distFront],
+            ]}
+            color="#ffffff"
+            lineWidth={1.5}
+          />
+          <Html
+            position={[0, 0.15, wZ / 2 + distFront / 2]}
+            center
+            zIndexRange={[100, 0]}
+          >
+            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+              {distFront.toFixed(2)} m
+            </div>
+          </Html>
+        </group>
+      )}
     </group>
   );
 }

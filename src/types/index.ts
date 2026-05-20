@@ -24,4 +24,53 @@ export interface PlacedFurniture extends FurnitureData {
   size?: [number, number, number]; //长宽高
   position: [number, number, number]; // [x, y, z] 坐标
   rotation?: [number, number, number]; // [x, y, z] 旋转角度（欧拉角）
+  // 协作同步字段
+  objectId?: string; // 服务器端 objectId（UUID）
+  ownerId?: string; // 创建者的 clientId
+  isRemote?: boolean; // 是否来自远程用户
 }
+
+// 3. 服务端家具数据格式（用于 WebSocket 消息）
+export interface CollabFurniture {
+  objectId: string;
+  prefab: string;
+  pos: { x: number; y: number; z: number };
+  rot: { x: number; y: number; z: number; w?: number };
+  scale: { x: number; y: number; z: number };
+  version: number;
+}
+
+// 4. WebSocket 消息类型
+export type CollabMessage =
+  | { type: 'join' }
+  | { type: 'ping' }
+  | { type: 'welcome'; userId: string }
+  | { type: 'pong'; ts: number }
+  | { type: 'sync_full'; state: CollabFurniture[]; srvTs: number }
+  | { type: 'user_online'; userId: string }
+  | { type: 'user_offline'; userId: string }
+  | {
+      type: 'create_furniture';
+      from: string;
+      payload: CollabFurniture;
+      srvTs: number;
+    }
+  | {
+      type: 'drag_update';
+      from: string;
+      payload: {
+        objectId: string;
+        pos: { x: number; y: number; z: number };
+        rot: { x: number; y: number; z: number; w?: number };
+        scale: { x: number; y: number; z: number };
+        version: number;
+      };
+      srvTs: number;
+    }
+  | {
+      type: 'delete_furniture';
+      from: string;
+      payload: { objectId: string };
+      srvTs: number;
+    }
+  | { type: 'error'; message: string };

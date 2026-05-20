@@ -107,6 +107,7 @@ export default function RoomScene() {
         </Suspense>
       </Canvas>
       <RightToolbar />
+      {/* <Minimap /> */}
     </div>
   );
 }

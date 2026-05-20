@@ -28,6 +28,11 @@ interface AppState {
   duplicateItem: (id: string) => void;
   rotateItem: (id: string) => void;
 
+  updateItemRotation: (
+    instanceId: string,
+    newRotation: [number, number, number],
+  ) => void;
+
   //全局拖拽状态(解决 OrbitControls 冲突)
   isDragging: boolean;
   setIsDragging: (dragging: boolean) => void;
@@ -42,6 +47,23 @@ interface AppState {
   selectedItemId: string | null;
   setSelectedItemId: (id: string | null) => void;
   removePlacedItem: (id: string) => void;
+
+  // --- 协作状态 ---
+  clientId: string | null;
+  setClientId: (id: string | null) => void;
+  collabConnected: boolean;
+  setCollabConnected: (v: boolean) => void;
+  collabEnabled: boolean;
+  setCollabEnabled: (v: boolean) => void;
+  onlineUsers: number;
+  setOnlineUsers: (n: number) => void;
+
+  // --- 侧边栏 Tab 控制与推荐状态 ---
+  activeSidebarTab: 'add' | 'recommend' | 'ai';
+  setActiveSidebarTab: (tab: 'add' | 'recommend' | 'ai') => void;
+
+  currentRecommendItem: FurnitureData | null;
+  setCurrentRecommendItem: (item: FurnitureData | null) => void;
 }
 
 // 创建 Store
@@ -88,6 +110,16 @@ const useStore = create<AppState>((set) => ({
     set((state) => ({
       placedItems: state.placedItems.map((item) =>
         item.instanceId === instanceId ? { ...item, size } : item,
+      ),
+    })),
+
+  // 实现更新旋转的具体逻辑
+  updateItemRotation: (instanceId, newRotation) =>
+    set((state) => ({
+      placedItems: state.placedItems.map((item) =>
+        item.instanceId === instanceId
+          ? { ...item, rotation: newRotation }
+          : item,
       ),
     })),
 
@@ -140,6 +172,22 @@ const useStore = create<AppState>((set) => ({
       // 如果删除的正是当前选中的，就把选中状态清空
       selectedItemId: state.selectedItemId === id ? null : state.selectedItemId,
     })),
+
+  // --- 协作初始值 ---
+  clientId: null,
+  setClientId: (id) => set({ clientId: id }),
+  collabConnected: false,
+  setCollabConnected: (v) => set({ collabConnected: v }),
+  collabEnabled: false,
+  setCollabEnabled: (v) => set({ collabEnabled: v }),
+  onlineUsers: 0,
+  setOnlineUsers: (n) => set({ onlineUsers: n }),
+
+  activeSidebarTab: 'add',
+  setActiveSidebarTab: (tab) => set({ activeSidebarTab: tab }),
+
+  currentRecommendItem: null,
+  setCurrentRecommendItem: (item) => set({ currentRecommendItem: item }),
 }));
 
 export default useStore;

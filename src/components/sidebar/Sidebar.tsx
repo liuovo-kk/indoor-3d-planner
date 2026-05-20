@@ -1,11 +1,11 @@
 // src/components/sidebar/Sidebar.tsx
-import React, { useState } from 'react';
+import React from 'react';
 import useStore from '../../store/useStore';
-import { PlusCircle, Wand2, Heart } from 'lucide-react';
+import { PlusCircle, Wand2, Star } from 'lucide-react';
 
 import AddPanel from './AddPanel';
 import AILayoutPanel from './AILayoutPanel';
-import FavoritesPanel from './FavoritesPanel';
+import RecommendPanel from './RecommendPanel';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -30,9 +30,8 @@ function NavItem({ icon, text, isActive, onClick }: NavItemProps) {
 
 export default function Sidebar() {
   const isSidebarOpen = useStore((state) => state.isSidebarOpen);
-  // 管理当前激活的 Tab 状态
-  const [activeTab, setActiveTab] = useState<'add' | 'ai' | 'favorites'>('add');
-
+  const activeTab = useStore((state) => state.activeSidebarTab);
+  const setActiveTab = useStore((state) => state.setActiveSidebarTab);
   return (
     <aside
       className={`
@@ -50,16 +49,16 @@ export default function Sidebar() {
             onClick={() => setActiveTab('add')}
           />
           <NavItem
+            icon={<Star size={20} strokeWidth={2.5} />}
+            text="Recommended"
+            isActive={activeTab === 'recommend'}
+            onClick={() => setActiveTab('recommend')}
+          />
+          <NavItem
             icon={<Wand2 size={20} strokeWidth={2.5} />}
             text="AI Layout"
             isActive={activeTab === 'ai'}
             onClick={() => setActiveTab('ai')}
-          />
-          <NavItem
-            icon={<Heart size={20} strokeWidth={2.5} />}
-            text="Favorites"
-            isActive={activeTab === 'favorites'}
-            onClick={() => setActiveTab('favorites')}
           />
         </div>
 
@@ -67,8 +66,8 @@ export default function Sidebar() {
         {/* 根据 activeTab 的值，挂载对应的组件 */}
         <div className="flex-1 overflow-hidden">
           {activeTab === 'add' && <AddPanel />}
+          {activeTab === 'recommend' && <RecommendPanel />}
           {activeTab === 'ai' && <AILayoutPanel />}
-          {activeTab === 'favorites' && <FavoritesPanel />}
         </div>
       </div>
     </aside>
