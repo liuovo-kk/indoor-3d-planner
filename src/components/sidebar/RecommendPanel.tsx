@@ -130,7 +130,7 @@ export default function RecommendPanel() {
         className="p-5 pb-2 flex items-center gap-2 cursor-pointer text-[#767676] hover:text-black font-bold text-sm transition-colors"
         onClick={() => setActiveTab('add')}
       >
-        <ArrowLeft size={18} strokeWidth={2.5} /> Back to Add
+        <ArrowLeft size={18} strokeWidth={2.5} /> 返回主列表
       </div>
 
       {/* ================= 1. 当前选中家具展示 (左右布局) ================= */}
@@ -152,12 +152,12 @@ export default function RecommendPanel() {
           <div className="flex flex-col gap-1.5 mt-2.5">
             {currentItem.category?.style && (
               <span className="bg-[#f5f5f5] text-[#484848] px-3 py-1 rounded-full text-[10px] font-bold w-fit truncate max-w-full border border-gray-200/60">
-                Style: {currentItem.category.style}
+                风格: {currentItem.category.style}
               </span>
             )}
             {currentItem.category?.material && (
               <span className="bg-[#f5f5f5] text-[#484848] px-3 py-1 rounded-full text-[10px] font-bold w-fit truncate max-w-full border border-gray-200/60">
-                Material: {currentItem.category.material}
+                材质: {currentItem.category.material}
               </span>
             )}
           </div>
@@ -176,9 +176,9 @@ export default function RecommendPanel() {
           </div>
         ) : (
           <div>
-            {renderRecommendRow('Same Category', recommendations.category)}
-            {renderRecommendRow('Same Style', recommendations.style)}
-            {renderRecommendRow('Same Material', recommendations.material)}
+            {renderRecommendRow('同一类别', recommendations.category)}
+            {renderRecommendRow('同一风格', recommendations.style)}
+            {renderRecommendRow('同一材质', recommendations.material)}
           </div>
         )}
       </div>

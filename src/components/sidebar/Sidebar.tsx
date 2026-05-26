@@ -44,19 +44,19 @@ export default function Sidebar() {
         <div className="h-17.5 flex items-center px-2 border-b border-gray-200 shrink-0">
           <NavItem
             icon={<PlusCircle size={20} strokeWidth={2.5} />}
-            text="Add"
+            text="添加"
             isActive={activeTab === 'add'}
             onClick={() => setActiveTab('add')}
           />
           <NavItem
             icon={<Star size={20} strokeWidth={2.5} />}
-            text="Recommended"
+            text="推荐"
             isActive={activeTab === 'recommend'}
             onClick={() => setActiveTab('recommend')}
           />
           <NavItem
             icon={<Wand2 size={20} strokeWidth={2.5} />}
-            text="AI Layout"
+            text="自动布局"
             isActive={activeTab === 'ai'}
             onClick={() => setActiveTab('ai')}
           />

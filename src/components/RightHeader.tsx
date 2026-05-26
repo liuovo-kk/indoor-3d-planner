@@ -82,7 +82,7 @@ export default function RightHeader() {
 
       {/* 标题 */}
       <div className="font-bold text-base flex items-center gap-2 cursor-pointer ml-4">
-        Untitled Design
+        我的房间
       </div>
 
       {/* 右侧：四大金刚图标 + 价格 + 结算按钮 */}
@@ -126,7 +126,7 @@ export default function RightHeader() {
         <div className="flex items-center gap-4 border-l border-gray-200 pl-6">
           {/* <span className="font-bold text-lg">$79.99</span> */}
           <button className="flex items-center gap-2 bg-[#6c6c6c] text-white border-none rounded-full px-6 py-2.5 font-bold cursor-pointer transition-colors hover:bg-[#0058a3] whitespace-nowrap text-base">
-            Summary
+            结算
             <ArrowRight size={18} strokeWidth={2.5} />
           </button>
         </div>

@@ -74,16 +74,16 @@ export default function Toolbar() {
           </div>
         )}
         {/* 主工具栏 */}
-        <div className="bg-white rounded-full flex items-center px-6 py-2 shadow-md gap-6 z-10">
+        <div className="bg-white rounded-full flex items-center px-6 py-2 shadow-md gap-2 z-10">
           <ToolbarButton
             icon={<Box size={18} strokeWidth={2.5} />}
-            text="Dollhouse"
+            text="3d鸟瞰图"
             isActive={viewMode === 'dollhouse'}
             onClick={() => setViewMode('dollhouse')}
           />
           <ToolbarButton
             icon={<PanelsTopLeft size={18} strokeWidth={2.5} />}
-            text="Top view"
+            text="2d俯视图"
             isActive={viewMode === 'top'}
             onClick={() => setViewMode('top')}
           />
@@ -92,7 +92,7 @@ export default function Toolbar() {
             icon={<FolderKanban size={18} strokeWidth={2.5} />}
             text={
               <span className="flex items-center gap-1">
-                Side views
+                侧视图
                 <ChevronDown
                   size={18}
                   strokeWidth={2.5}
@@ -104,14 +104,14 @@ export default function Toolbar() {
             onClick={() => setShowSideMenu(!showSideMenu)}
           />
 
-          {/* 分割线 */}
+          {/* 分割线
           <div className="w-px h-5 bg-gray-200 mx-2"></div>
 
           <ToolbarButton
             icon={<Footprints size={18} color="#ccc" strokeWidth={2.5} />}
-            text="Move to"
+            text="移动到"
             isDisabled={true}
-          />
+          /> */}
         </div>
       </div>
     </>

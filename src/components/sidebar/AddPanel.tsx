@@ -15,10 +15,19 @@ export default function AddPanel() {
   );
 
   const handleSelectAndPlace = (item: FurnitureData) => {
+    const categoryName = item.category?.category?.toLowerCase() || '';
+    const isCeilingItem =
+      (categoryName.includes('lamp') ||
+        categoryName.includes('light') ||
+        categoryName.includes('chandelier') ||
+        categoryName.includes('pendant')) &&
+      !categoryName.includes('floor');
+
+    const startY = isCeilingItem ? 2.8 : 0;
     const newItem = {
       ...item,
       instanceId: Math.random().toString(36).substring(7),
-      position: [Math.random() - 0.5, 0, Math.random() - 0.5] as [
+      position: [Math.random() - 0.5, startY, Math.random() - 0.5] as [
         number,
         number,
         number,
@@ -82,24 +91,23 @@ export default function AddPanel() {
       {/* 搜索和分类栏 */}
       <div className="p-6 pb-3 shrink-0">
         <div className="bg-[#f5f5f5] rounded-3xl py-3 px-5 text-[#767676] text-base flex items-center gap-2">
-          <Search size={18} /> What are you looking for?
+          <Search size={18} /> 你在找什么家具？
         </div>
         <h2 className="text-base my-6 font-bold flex items-center gap-1 cursor-pointer w-fit hover:opacity-70 transition-opacity">
-          Living room{' '}
-          <ChevronDown size={18} strokeWidth={2.5} className="mt-0.5" />
+          卧室 <ChevronDown size={18} strokeWidth={2.5} className="mt-0.5" />
         </h2>
         <div className="flex flex-wrap gap-2">
           <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
-            Armchairs
+            椅子
           </span>
           <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
-            Sofas
+            沙发
           </span>
           <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
-            Lamps
+            台灯
           </span>
           <span className="bg-[#f5f5f5] px-4 py-2 rounded-2xl text-sm font-bold cursor-pointer hover:bg-gray-200">
-            beds
+            床
           </span>
         </div>
       </div>

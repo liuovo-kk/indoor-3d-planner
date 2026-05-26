@@ -6,7 +6,10 @@ import * as THREE from 'three';
 import useStore from '../store/useStore';
 import AsyncModel from './AsyncModel';
 
+const ROOM_HEIGHT = 2.8;
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const ceilingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), ROOM_HEIGHT);
+
 const ROOM_SIZE = 6; // 房间长宽
 const ROOM_HALF = ROOM_SIZE / 2;
 
@@ -36,10 +39,19 @@ export default function DraggableFurniture({
   ]);
   const dragOffset = useRef({ x: 0, z: 0 });
 
-  // 🌟 局部状态：分别驱动“移动”和“旋转”的丝滑渲染
+  // 局部状态：分别驱动“移动”和“旋转”的丝滑渲染
   const [livePos, setLivePos] =
     useState<[number, number, number]>(initialPosition);
   const [liveRotY, setLiveRotY] = useState<number>(rotation[1] || 0);
+
+  // 通过初始高度判断它属于哪个“物理图层”
+  const isCeilingItem = initialPosition[1] >= ROOM_HEIGHT - 0.5;
+
+  // 智能计算模型与碰撞盒的 Y 轴偏移量
+  // 1. 模型偏移：天上家具往下移动自身高度(倒挂)，地上家具不移动(坐落)
+  const modelOffsetY = isCeilingItem ? -modelSize[1] : 0;
+  // 2. 盒子偏移：天上家具盒子中心在负半轴，地上家具盒子中心在正半轴
+  const boxOffsetY = isCeilingItem ? -modelSize[1] / 2 : modelSize[1] / 2;
 
   // 当外部数据源更新时同步
   useEffect(() => {
@@ -78,7 +90,10 @@ export default function DraggableFurniture({
 
     if (active && groupRef.current) {
       const intersection = new THREE.Vector3();
-      raycaster.ray.intersectPlane(floorPlane, intersection);
+
+      // 动态切换射线检测平面：如果是吊灯，就射向天花板
+      const activePlane = isCeilingItem ? ceilingPlane : floorPlane;
+      raycaster.ray.intersectPlane(activePlane, intersection);
 
       if (intersection) {
         if (first) {
@@ -112,6 +127,10 @@ export default function DraggableFurniture({
         for (const other of placedItems) {
           if (other.instanceId === instanceId || !other.size) continue;
 
+          //  物理隔离：天上和地下的东西互不干涉，绝不碰撞
+          const isOtherCeiling = other.position[1] >= ROOM_HEIGHT - 0.5;
+          if (isCeilingItem !== isOtherCeiling) continue;
+
           const oRotY = other.rotation ? other.rotation[1] : 0;
           const oWx =
             Math.abs(Math.cos(oRotY) * other.size[0]) +
@@ -141,7 +160,7 @@ export default function DraggableFurniture({
     }
   });
 
-  // ================= 🌟 2. 自由旋转拖拽逻辑 (核心魔法) =================
+  // ================= 🌟 自由旋转拖拽逻辑 =================
   const bindRotate = useDrag(({ active, event }) => {
     event.stopPropagation(); // 阻止触发平移
     setIsDragging(active);
@@ -149,7 +168,9 @@ export default function DraggableFurniture({
 
     if (active && groupRef.current) {
       const intersection = new THREE.Vector3();
-      raycaster.ray.intersectPlane(floorPlane, intersection);
+      // 旋转时也用对应的平面
+      const activePlane = isCeilingItem ? ceilingPlane : floorPlane;
+      raycaster.ray.intersectPlane(activePlane, intersection);
 
       if (intersection) {
         // 计算鼠标当前位置与家具中心点的 X 和 Z 差值
@@ -168,7 +189,8 @@ export default function DraggableFurniture({
     }
   });
 
-  // 动态尺寸线数学计算 (依据实时的 liveRotY 计算动态包围盒 wX 和 wZ)
+  // ================= 🌟 智能尺寸线距离计算 (防家具遮挡) =================
+  // 1. 先计算当前拖拽家具(A)的占据边界
   const wX =
     Math.abs(Math.cos(liveRotY) * modelSize[0]) +
     Math.abs(Math.sin(liveRotY) * modelSize[2]);
@@ -176,10 +198,66 @@ export default function DraggableFurniture({
     Math.abs(Math.sin(liveRotY) * modelSize[0]) +
     Math.abs(Math.cos(liveRotY) * modelSize[2]);
 
-  const distLeft = livePos[0] - wX / 2 - -ROOM_HALF;
-  const distRight = ROOM_HALF - (livePos[0] + wX / 2);
-  const distBack = livePos[2] - wZ / 2 - -ROOM_HALF;
-  const distFront = ROOM_HALF - (livePos[2] + wZ / 2);
+  const aLeft = livePos[0] - wX / 2;
+  const aRight = livePos[0] + wX / 2;
+  const aBack = livePos[2] - wZ / 2;
+  const aFront = livePos[2] + wZ / 2;
+
+  // 2. 默认的距离（到四面墙壁）
+  let distLeft = aLeft - -ROOM_HALF;
+  let distRight = ROOM_HALF - aRight;
+  let distBack = aBack - -ROOM_HALF;
+  let distFront = ROOM_HALF - aFront;
+
+  // 3. 遍历寻找距离当前家具最近的障碍物
+  placedItems.forEach((other) => {
+    if (other.instanceId === instanceId || !other.size) return;
+
+    // 尺寸测量的隔离：吊灯的测量线不应该被地上的沙发挡住
+    const isOtherCeiling = other.position[1] >= ROOM_HEIGHT - 0.5;
+    if (isCeilingItem !== isOtherCeiling) return;
+
+    // 计算其他家具(B)的真实占据边界
+    const oRotY = other.rotation ? other.rotation[1] : 0;
+    const oWx =
+      Math.abs(Math.cos(oRotY) * other.size[0]) +
+      Math.abs(Math.sin(oRotY) * other.size[2]);
+    const oWz =
+      Math.abs(Math.sin(oRotY) * other.size[0]) +
+      Math.abs(Math.cos(oRotY) * other.size[2]);
+
+    const bLeft = other.position[0] - oWx / 2;
+    const bRight = other.position[0] + oWx / 2;
+    const bBack = other.position[2] - oWz / 2;
+    const bFront = other.position[2] + oWz / 2;
+
+    // 判断在 Z 轴或 X 轴上是否存在交集 (也就是判断是否位于正左/正前/等方向上)
+    const overlapZ = bBack < aFront && bFront > aBack; // 在水平射线上有遮挡
+    const overlapX = bLeft < aRight && bRight > aLeft; // 在垂直射线上有遮挡
+
+    // 检查左侧：如果 B 在 A 的左侧，且存在 Z轴重叠
+    if (overlapZ && bRight <= aLeft) {
+      const d = aLeft - bRight;
+      if (d < distLeft) distLeft = d; // 取最近的距离
+    }
+    // 检查右侧：如果 B 在 A 的右侧，且存在 Z轴重叠
+    if (overlapZ && bLeft >= aRight) {
+      const d = bLeft - aRight;
+      if (d < distRight) distRight = d;
+    }
+    // 检查后侧：如果 B 在 A 的后侧，且存在 X轴重叠
+    if (overlapX && bFront <= aBack) {
+      const d = aBack - bFront;
+      if (d < distBack) distBack = d;
+    }
+    // 检查前侧：如果 B 在 A 的前侧，且存在 X轴重叠
+    if (overlapX && bBack >= aFront) {
+      const d = bBack - aFront;
+      if (d < distFront) distFront = d;
+    }
+  });
+
+  const lineY = isCeilingItem ? -0.1 : 0.1;
 
   return (
     <group
@@ -191,7 +269,9 @@ export default function DraggableFurniture({
         setSelectedItemId(instanceId);
       }}
     >
-      <AsyncModel modelId={model_id} onLoadSize={handleModelLoad} />
+      <group position={[0, modelOffsetY, 0]}>
+        <AsyncModel modelId={model_id} onLoadSize={handleModelLoad} />
+      </group>
 
       <mesh
         {...(bind() as any)}
@@ -200,28 +280,28 @@ export default function DraggableFurniture({
           setHovered(true);
         }}
         onPointerOut={() => setHovered(false)}
-        position={[0, modelSize[1] / 2, 0]}
+        position={[0, boxOffsetY, 0]}
       >
         <boxGeometry args={[modelSize[0], modelSize[1], modelSize[2]]} />
         <meshBasicMaterial transparent opacity={0} />
         {isSelected && <Edges linewidth={1} color="white" />}
       </mesh>
 
-      {/* ================= 🌟 3. 自由旋转 UI 控制手柄 ================= */}
+      {/* ================= 🌟 自由旋转 UI 控制手柄 ================= */}
       {isSelected && (
         <group>
           {/* 连着手柄的线：从家具正前方往外伸 0.6米 */}
           <Line
             points={[
-              [0, 0.1, modelSize[2] / 2],
-              [0, 0.1, modelSize[2] / 2 + 0.4],
+              [0, lineY, modelSize[2] / 2],
+              [0, lineY, modelSize[2] / 2 + 0.4],
             ]}
             color="white"
             lineWidth={1.5}
           />
           {/* 拖拽手柄圆盘 */}
           <mesh
-            position={[0, 0.1, modelSize[2] / 2 + 0.4]}
+            position={[0, lineY, modelSize[2] / 2 + 0.4]}
             {...(bindRotate() as any)}
             onPointerOver={(e) => {
               e.stopPropagation();
@@ -244,18 +324,17 @@ export default function DraggableFurniture({
       {isSelected && (
         //反向旋转抵消 liveRotY，让标尺线永远平行于房间墙壁
         <group rotation={[0, -liveRotY, 0]}>
-          {/* 1. 左侧：一条完美的连续实/虚线从家具边缘连到墙壁 */}
+          {/* 1. 左侧线 */}
           <Line
             points={[
-              [-wX / 2, 0.1, 0],
-              [-wX / 2 - distLeft, 0.1, 0],
+              [-wX / 2, lineY, 0],
+              [-wX / 2 - distLeft, lineY, 0],
             ]}
             color="#ffffff"
             lineWidth={1.5}
           />
-          {/* 纯文本数字：无背景框，加了 text-shadow 确保穿线时依然清晰 */}
           <Html
-            position={[-wX / 2 - distLeft / 2, 0.15, 0]}
+            position={[-wX / 2 - distLeft / 2, lineY + 0.05, 0]}
             center
             zIndexRange={[100, 0]}
           >
@@ -264,17 +343,17 @@ export default function DraggableFurniture({
             </div>
           </Html>
 
-          {/* 2. 右侧线与文本 */}
+          {/* 2. 右侧线 */}
           <Line
             points={[
-              [wX / 2, 0.1, 0],
-              [wX / 2 + distRight, 0.1, 0],
+              [wX / 2, lineY, 0],
+              [wX / 2 + distRight, lineY, 0],
             ]}
             color="#ffffff"
             lineWidth={1.5}
           />
           <Html
-            position={[wX / 2 + distRight / 2, 0.15, 0]}
+            position={[wX / 2 + distRight / 2, lineY + 0.05, 0]}
             center
             zIndexRange={[100, 0]}
           >
@@ -283,37 +362,36 @@ export default function DraggableFurniture({
             </div>
           </Html>
 
-          {/* 3. 后侧线与文本 */}
+          {/* 3. 后侧线 */}
           <Line
             points={[
-              [0, 0.1, -wZ / 2],
-              [0, 0.1, -wZ / 2 - distBack],
+              [0, lineY, -wZ / 2],
+              [0, lineY, -wZ / 2 - distBack],
             ]}
             color="#ffffff"
             lineWidth={1.5}
           />
           <Html
-            position={[0, 0.15, -wZ / 2 - distBack / 2]}
+            position={[0, lineY + 0.05, -wZ / 2 - distBack / 2]}
             center
             zIndexRange={[100, 0]}
           >
             <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
-              {' '}
               {distBack.toFixed(2)} m
             </div>
           </Html>
 
-          {/* 4. 前侧线与文本 */}
+          {/* 4. 前侧线 */}
           <Line
             points={[
-              [0, 0.1, wZ / 2],
-              [0, 0.1, wZ / 2 + distFront],
+              [0, lineY, wZ / 2],
+              [0, lineY, wZ / 2 + distFront],
             ]}
             color="#ffffff"
             lineWidth={1.5}
           />
           <Html
-            position={[0, 0.15, wZ / 2 + distFront / 2]}
+            position={[0, lineY + 0.05, wZ / 2 + distFront / 2]}
             center
             zIndexRange={[100, 0]}
           >
