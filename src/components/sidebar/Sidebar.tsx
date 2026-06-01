@@ -20,7 +20,7 @@ function NavItem({ icon, text, isActive, onClick }: NavItemProps) {
       onClick={onClick} // 触发外层传入的切换事件
       className={`
       flex-1 flex justify-center items-center gap-2 h-full cursor-pointer font-bold transition-all whitespace-nowrap text-base
-      ${isActive ? 'border-b-[3px] border-black text-black' : 'text-[#767676] hover:text-black hover:bg-gray-50'}
+      ${isActive ? 'border-b-[3px] border-[#094b84] text-[#094b84]' : 'text-[#767676] hover:text-black hover:bg-gray-50'}
     `}
     >
       {icon} {text}
@@ -41,7 +41,7 @@ export default function Sidebar() {
     >
       <div className="w-125 flex flex-col h-full">
         {/* ================= 头部导航 ================= */}
-        <div className="h-17.5 flex items-center px-2 border-b border-gray-200 shrink-0">
+        <div className="h-16 flex items-center px-2 border-b border-gray-200 shrink-0">
           <NavItem
             icon={<PlusCircle size={20} strokeWidth={2.5} />}
             text="添加"

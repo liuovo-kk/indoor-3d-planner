@@ -3,6 +3,7 @@ import Sidebar from './components/sidebar/Sidebar';
 import RightHeader from './components/RightHeader';
 import Toolbar from './components/Toolbar';
 import RoomScene from './scene/RoomScene';
+import AuthModal from './components/AuthModal';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Toolbar />
         </main>
       </div>
+      <AuthModal />
     </div>
   );
 }

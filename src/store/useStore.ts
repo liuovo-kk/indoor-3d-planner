@@ -2,8 +2,23 @@
 import { create } from 'zustand';
 import { FurnitureData, PlacedFurniture } from '../types';
 
+export interface UserInfo {
+  id: string;
+  username: string;
+  avatar?: string;
+}
+
 // 定义整个 Store 的数据结构
 interface AppState {
+  // --- 身份鉴权状态 ---
+  token: string | null;
+  user: UserInfo | null;
+  isAuthModalOpen: boolean; // 控制登录弹窗的显示/隐藏
+
+  setAuthModalOpen: (isOpen: boolean) => void;
+  loginSuccess: (token: string, user: UserInfo) => void;
+  logout: () => void;
+
   // --- UI 状态 ---
   furnitureList: FurnitureData[];
   setFurnitureList: (list: FurnitureData[]) => void;
@@ -68,6 +83,27 @@ interface AppState {
 
 // 创建 Store
 const useStore = create<AppState>((set) => ({
+  // --- 身份鉴权初始值与方法 ---
+  // 初始化时直接去 localStorage 捞一下 Token，实现自动登录保持
+  token: localStorage.getItem('app_token') || null,
+  user: JSON.parse(localStorage.getItem('app_user') || 'null'),
+  isAuthModalOpen: false,
+
+  setAuthModalOpen: (isOpen) => set({ isAuthModalOpen: isOpen }),
+
+  loginSuccess: (token, user) => {
+    localStorage.setItem('app_token', token);
+    localStorage.setItem('app_user', JSON.stringify(user));
+    set({ token, user, isAuthModalOpen: false });
+  },
+
+  logout: () => {
+    localStorage.removeItem('app_token');
+    localStorage.removeItem('app_user');
+    set({ token: null, user: null });
+  },
+
+  // --- UI 初始值与方法 ---
   furnitureList: [],
   setFurnitureList: (list) => set({ furnitureList: list }),
 
@@ -100,7 +136,10 @@ const useStore = create<AppState>((set) => ({
     set((state) => ({
       placedItems: state.placedItems.map((item) =>
         item.instanceId === instanceId
-          ? { ...item, position: [newPosition[0], 0, newPosition[2]] }
+          ? {
+              ...item,
+              position: [newPosition[0], newPosition[1], newPosition[2]],
+            }
           : item,
       ),
     })),
