@@ -3,15 +3,20 @@ import {
   ChevronLeft,
   ChevronRight,
   Headset,
-  Camera,
-  Save,
   ShoppingBasket,
-  ArrowRight,
+  Save,
+  Download,
   User,
   ChevronDown,
   LogOut,
+  Map,
 } from 'lucide-react';
 import useStore from '../store/useStore';
+
+const SCENE_LIST = [
+  { id: 'guestroom', name: '次卧场景' },
+  { id: 'bigroom', name: '主卧场景' },
+];
 
 export default function RightHeader() {
   const {
@@ -21,6 +26,9 @@ export default function RightHeader() {
     user,
     setAuthModalOpen,
     logout,
+    currentScene,
+    setCurrentScene,
+    saveCurrentScene,
   } = useStore();
 
   const collabEnabled = useStore((s) => s.collabEnabled);
@@ -28,8 +36,11 @@ export default function RightHeader() {
   const onlineUsers = useStore((s) => s.onlineUsers);
   const setCollabEnabled = useStore((s) => s.setCollabEnabled);
 
-  const handleExportVR = () => {
-    // 鉴权拦截：如果没有登录，直接弹登录框并终止保存流程
+  const currentSceneName =
+    SCENE_LIST.find((s) => s.id === currentScene)?.name || '未命名场景';
+
+  const handleSaveAndExport = () => {
+    // 鉴权拦截
     if (!token) {
       setAuthModalOpen(true);
       return;
@@ -38,12 +49,17 @@ export default function RightHeader() {
     const placedItems = useStore.getState().placedItems;
 
     if (placedItems.length === 0) {
-      alert('房间里还没有家具哦，请先放置家具再导出！');
+      alert('房间里还没有家具哦，请先放置家具再保存！');
       return;
     }
 
+    // 将当前家具快照保存到此场景专属字典里
+    saveCurrentScene();
+
+    alert(`【${currentSceneName}】已成功保存！`);
+
     const syncData = {
-      scene_id: `room_${Date.now()}`,
+      scene_id: currentScene,
       timestamp: Date.now(),
       items: placedItems.map((item) => {
         const currentRotY = item.rotation ? item.rotation[1] : 0;
@@ -68,19 +84,30 @@ export default function RightHeader() {
       }),
     };
 
-    // 将 JSON 对象变成文件下载到本地
-    const dataStr =
-      'data:text/json;charset=utf-8,' +
-      encodeURIComponent(JSON.stringify(syncData, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute('href', dataStr);
-    downloadAnchorNode.setAttribute('download', 'vr_scene_sync.json');
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    // // 将 JSON 对象变成文件下载到本地
+    // const dataStr =
+    //   'data:text/json;charset=utf-8,' +
+    //   encodeURIComponent(JSON.stringify(syncData, null, 2));
+    // const downloadAnchorNode = document.createElement('a');
+    // downloadAnchorNode.setAttribute('href', dataStr);
+    // downloadAnchorNode.setAttribute('download', 'vr_scene_sync.json');
+    // document.body.appendChild(downloadAnchorNode);
+    // downloadAnchorNode.click();
+    // downloadAnchorNode.remove();
 
-    console.log('VR 同步数据已导出:', syncData);
-    alert('VR 场景数据已导出！请将下载的 JSON 文件发给 Unity 端进行测试。');
+    // console.log('VR 同步数据已导出:', syncData);
+    // alert('VR 场景数据已导出！请将下载的 JSON 文件发给 Unity 端进行测试。');
+  };
+
+  const handleExportModel = () => {
+    const placedItems = useStore.getState().placedItems;
+    if (placedItems.length === 0) {
+      alert('房间为空，无需导出！');
+      return;
+    }
+
+    // 触发全局自定义事件，让 3D 画布内部的组件去捕获并执行导出
+    document.dispatchEvent(new CustomEvent('export-scene-to-glb'));
   };
 
   return (
@@ -95,12 +122,39 @@ export default function RightHeader() {
         {isSidebarOpen ? <ChevronLeft size={24} /> : <ChevronRight size={24} />}
       </button>
 
-      {/* 标题 */}
-      <div className="font-bold text-base flex items-center gap-2 cursor-pointer ml-4">
-        我的房间
-      </div>
+      <div className="flex items-center gap-2 ml-4">
+        <div className="font-bold text-base flex items-center gap-2 cursor-pointer ml-4">
+          My Room
+        </div>
+        <div className="relative group flex items-center cursor-pointer h-full py-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-gray-700 hover:text-[#0058a3] transition-colors bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
+            <Map size={16} className="text-gray-400" />
+            {currentSceneName}
+            <ChevronDown
+              size={14}
+              className="text-gray-400 group-hover:rotate-180 transition-transform duration-200 ml-1"
+            />
+          </div>
 
-      {/* 右侧：四大金刚图标 + 价格 + 结算按钮 */}
+          <div className="absolute top-[85%] left-0 pt-2 w-44 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+            <div className="bg-white border border-gray-100 rounded-xl shadow-lg overflow-hidden flex flex-col p-1">
+              {SCENE_LIST.map((scene) => (
+                <button
+                  key={scene.id}
+                  onClick={() => setCurrentScene(scene.id)}
+                  className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 font-bold rounded-lg transition-colors hover:bg-blue-50 ${
+                    currentScene === scene.id
+                      ? 'text-[#157fe2] bg-blue-50/50'
+                      : 'text-gray-600'
+                  }`}
+                >
+                  {scene.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
       <div className="flex items-center gap-6">
         {/* 一排图标组合 */}
         <div className="flex items-center gap-5 text-black">
@@ -118,7 +172,7 @@ export default function RightHeader() {
             <Headset size={22} strokeWidth={2} />
             <span className="absolute 0 right-0 w-2 h-2 bg-green-500 rounded-full border border-white"></span>
           </div>
-          <Camera
+          <ShoppingBasket
             size={22}
             strokeWidth={2}
             className="cursor-pointer hover:opacity-70"
@@ -127,13 +181,15 @@ export default function RightHeader() {
             size={22}
             strokeWidth={2}
             className="cursor-pointer hover:opacity-70 text-black hover:text-blue-600 transition-colors"
-            onClick={handleExportVR}
-            // title="保存并导出 VR 场景 (JSON)"
+            onClick={handleSaveAndExport}
+            // title="保存当前场景"
           />
-          <ShoppingBasket
+          <Download
             size={22}
             strokeWidth={2}
-            className="cursor-pointer hover:opacity-70"
+            className="cursor-pointer hover:opacity-70 text-black hover:text-green-600 transition-colors"
+            onClick={handleExportModel}
+            // title="导出为 3D 模型文件 (GLB)"
           />
         </div>
 

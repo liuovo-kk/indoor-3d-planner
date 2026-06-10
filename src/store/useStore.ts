@@ -8,6 +8,14 @@ export interface UserInfo {
   avatar?: string;
 }
 
+export interface StaticObstacle {
+  id: string;
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+}
+
 // 定义整个 Store 的数据结构
 interface AppState {
   // --- 身份鉴权状态 ---
@@ -48,6 +56,9 @@ interface AppState {
     newRotation: [number, number, number],
   ) => void;
 
+  staticObstacles: StaticObstacle[];
+  setStaticObstacles: (obs: StaticObstacle[]) => void;
+
   //全局拖拽状态(解决 OrbitControls 冲突)
   isDragging: boolean;
   setIsDragging: (dragging: boolean) => void;
@@ -62,6 +73,19 @@ interface AppState {
   selectedItemId: string | null;
   setSelectedItemId: (id: string | null) => void;
   removePlacedItem: (id: string) => void;
+
+  // --- 房间尺寸（由 RoomBox 动态检测后设置） ---
+  roomWidth: number;
+  roomDepth: number;
+  setRoomSize: (w: number, d: number) => void;
+
+  // --- 场景切换与多房间状态隔离 ---
+  currentScene: string; // 改成 string 以支持无限多房间
+  setCurrentScene: (scene: string) => void;
+
+  // 存储每个房间各自保存的家具数据
+  savedScenes: Record<string, PlacedFurniture[]>;
+  saveCurrentScene: () => void;
 
   // --- 协作状态 ---
   clientId: string | null;
@@ -212,6 +236,32 @@ const useStore = create<AppState>((set) => ({
       selectedItemId: state.selectedItemId === id ? null : state.selectedItemId,
     })),
 
+  // --- 房间尺寸初始值 ---
+  roomWidth: 6,
+  roomDepth: 6,
+  setRoomSize: (w, d) => set({ roomWidth: w, roomDepth: d }),
+
+  // --- 场景切换与隔离实现 ---
+  currentScene: 'guestroom', // 默认场景
+  savedScenes: {}, // 初始为空字典
+
+  // 保存当前房间：以 sceneId 为 key，存入当前的 placedItems
+  saveCurrentScene: () =>
+    set((state) => ({
+      savedScenes: {
+        ...state.savedScenes,
+        [state.currentScene]: [...state.placedItems],
+      },
+    })),
+
+  // 切换房间
+  setCurrentScene: (scene) =>
+    set((state) => ({
+      currentScene: scene,
+      //  如果目标房间被保存过，就恢复它；如果没有保存过，就给一个 [] 全新状态
+      placedItems: state.savedScenes[scene] || [],
+      selectedItemId: null, // 切换房间时清除选中状态，防止 Bug
+    })),
   // --- 协作初始值 ---
   clientId: null,
   setClientId: (id) => set({ clientId: id }),
@@ -227,6 +277,9 @@ const useStore = create<AppState>((set) => ({
 
   currentRecommendItem: null,
   setCurrentRecommendItem: (item) => set({ currentRecommendItem: item }),
+
+  staticObstacles: [],
+  setStaticObstacles: (obs) => set({ staticObstacles: obs }),
 }));
 
 export default useStore;

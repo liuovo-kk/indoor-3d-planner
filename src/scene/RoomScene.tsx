@@ -1,8 +1,10 @@
 import { Suspense, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
+import { useThree } from '@react-three/fiber';
+import { GLTFExporter } from 'three-stdlib';
 import useStore from '../store/useStore';
-import RoomBase from './RoomBase';
+import RoomBox from './RoomBox';
 import CameraRig from './CameraRig';
 import DraggableFurniture from './DraggableFurniture';
 import * as THREE from 'three';
@@ -11,6 +13,7 @@ import RightToolbar from '../components/RightToolbar';
 export default function RoomScene() {
   // 从 Store 获取 3D 场景需要的数据和方法
   const placedItems = useStore((state) => state.placedItems);
+  const currentScene = useStore((state) => state.currentScene);
   // const addPlacedItem = useStore((state) => state.addPlacedItem);
   const viewMode = useStore((state) => state.viewMode);
 
@@ -49,6 +52,10 @@ export default function RoomScene() {
       >
         <CameraRig />
 
+        <SceneExporter />
+
+        {/* <DebugObstacles /> */}
+
         {/* ==================== 🌟 绝对保底层 (永远秒出，绝不黑屏) ==================== */}
         {/* 把背景色、雾效、灯光、地板、控制器全部移出 Suspense！ */}
         <color attach="background" args={['#efefef']} />
@@ -85,16 +92,14 @@ export default function RoomScene() {
           enabled={!isDragging}
         />
 
-        {/*  点击空白地板时，取消选中状态 */}
-        <RoomBase
-          onFloorClick={() => {
-            setSelectedItemId(null);
-          }}
-        />
-
+        {/* 主场景（默认房间 + 环境 + 家具）同一个 Suspense */}
         <Suspense fallback={null}>
+          <RoomBox
+            glbUrl="/models/GuestRoomBox.glb"
+            visible={currentScene === 'guestroom'}
+            onFloorClick={() => setSelectedItemId(null)}
+          />
           <Environment files="/assets/indoor.hdr" />
-          {/* 渲染所有已放置的家具 */}
           {placedItems.map((item) => (
             <DraggableFurniture
               key={item.instanceId}
@@ -105,9 +110,88 @@ export default function RoomScene() {
             />
           ))}
         </Suspense>
+
+        {/* BIGROOM 独立 Suspense，后台加载不影响主场景 */}
+        <Suspense fallback={null}>
+          <RoomBox
+            glbUrl="/models/BIGROOM.glb"
+            visible={currentScene === 'bigroom'}
+            onFloorClick={() => setSelectedItemId(null)}
+            roomRotation={[0, Math.PI, 0]} //沿 Y 轴旋转 180 度
+          />
+        </Suspense>
       </Canvas>
       <RightToolbar />
       {/* <Minimap /> */}
     </div>
   );
+}
+
+// 🛠️ 专门用来调试的红色线框组件
+function DebugObstacles() {
+  const staticObstacles = useStore((state) => state.staticObstacles);
+
+  return (
+    <group>
+      {staticObstacles.map((obs, index) => (
+        // 因为我们只存了 X 和 Z，Y 轴暂时悬空放在 1 米的高度，高度设为 2 米
+        <mesh key={index} position={[obs.x, 1, obs.z]}>
+          <boxGeometry args={[obs.w, 2, obs.d]} />
+          {/* wireframe: true 会让它变成透明红框，方便你看清里面的模型 */}
+          <meshBasicMaterial wireframe color="red" />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// 🌟 核心引擎：监听事件并导出 GLB 的隐形组件
+function SceneExporter() {
+  const { scene } = useThree(); // 获取当前 3D 场景的所有数据
+
+  useEffect(() => {
+    const handleExport = () => {
+      // 显示提示，防止导出大场景时卡顿让用户以为死机
+      console.log('正在打包 3D 场景，请稍候...');
+
+      const exporter = new GLTFExporter();
+
+      // parse 方法会把 scene 里的所有网格、材质、贴图全部抓取出来
+      exporter.parse(
+        scene,
+        (result) => {
+          // 因为配置了 binary: true，这里的 result 是一个二进制流 (ArrayBuffer)
+          const blob = new Blob([result as ArrayBuffer], {
+            type: 'application/octet-stream',
+          });
+          const url = URL.createObjectURL(blob);
+
+          // 创建一个隐藏的 a 标签模拟点击下载
+          const link = document.createElement('a');
+          link.style.display = 'none';
+          link.href = url;
+          link.download = `my_room_design_${Date.now()}.glb`; // 自动生成带时间戳的文件名
+
+          document.body.appendChild(link);
+          link.click(); // 触发浏览器下载
+
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url); // 释放内存
+          console.log('导出成功！');
+        },
+        (error) => {
+          console.error('导出 GLB 失败:', error);
+          alert('导出失败，请检查控制台报错');
+        },
+        { binary: true }, // 🌟 必须为 true：打包为单文件 .glb (包含图片)，而不是分离的 .gltf
+      );
+    };
+
+    // 监听 Header 发来的导出指令
+    document.addEventListener('export-scene-to-glb', handleExport);
+    return () =>
+      document.removeEventListener('export-scene-to-glb', handleExport);
+  }, [scene]);
+
+  return null; // 这个组件在画面上什么都不渲染
 }

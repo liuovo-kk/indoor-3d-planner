@@ -84,6 +84,8 @@ export default function DraggableFurniture({
   );
 
   const bind = useDrag(({ active, event, first }) => {
+    const staticObstacles = useStore.getState().staticObstacles;
+
     setDragging(active);
     setIsDragging(active);
     event.stopPropagation();
@@ -149,6 +151,20 @@ export default function DraggableFurniture({
         }
 
         if (!isColliding) {
+          for (const obs of staticObstacles) {
+            const gapX = Math.abs(targetX - obs.x);
+            const gapZ = Math.abs(targetZ - obs.z);
+
+            // 你的沙发宽度是 wX，障碍物宽度是 obs.w
+            if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
+              isColliding = true;
+              console.log('撞到内置家具了！阻止移动！', obs.id); // 加上这行日志
+              break;
+            }
+          }
+        }
+
+        if (!isColliding) {
           groupRef.current.position.x = targetX;
           groupRef.current.position.z = targetZ;
           setLivePos([targetX, initialPosition[1], targetZ]);
@@ -160,7 +176,7 @@ export default function DraggableFurniture({
     }
   });
 
-  // ================= 🌟 自由旋转拖拽逻辑 =================
+  // 自由旋转拖拽逻辑
   const bindRotate = useDrag(({ active, event }) => {
     event.stopPropagation(); // 阻止触发平移
     setIsDragging(active);
@@ -189,7 +205,7 @@ export default function DraggableFurniture({
     }
   });
 
-  // ================= 🌟 智能尺寸线距离计算 (防家具遮挡) =================
+  // 智能尺寸线距离计算 (防家具遮挡)
   // 1. 先计算当前拖拽家具(A)的占据边界
   const wX =
     Math.abs(Math.cos(liveRotY) * modelSize[0]) +
@@ -287,7 +303,7 @@ export default function DraggableFurniture({
         {isSelected && <Edges linewidth={1} color="white" />}
       </mesh>
 
-      {/* ================= 🌟 自由旋转 UI 控制手柄 ================= */}
+      {/* 自由旋转 UI 控制手柄  */}
       {isSelected && (
         <group>
           {/* 连着手柄的线：从家具正前方往外伸 0.6米 */}
@@ -320,7 +336,7 @@ export default function DraggableFurniture({
         </group>
       )}
 
-      {/* ================= 🌟 动态尺寸线渲染层 ================= */}
+      {/* 动态尺寸线渲染层 */}
       {isSelected && (
         //反向旋转抵消 liveRotY，让标尺线永远平行于房间墙壁
         <group rotation={[0, -liveRotY, 0]}>
