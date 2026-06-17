@@ -6,13 +6,6 @@ import * as THREE from 'three';
 import useStore from '../store/useStore';
 import AsyncModel from './AsyncModel';
 
-const ROOM_HEIGHT = 2.8;
-const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const ceilingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), ROOM_HEIGHT);
-
-const ROOM_SIZE = 6; // 房间长宽
-const ROOM_HALF = ROOM_SIZE / 2;
-
 interface DraggableFurnitureProps {
   initialPosition?: [number, number, number];
   rotation?: [number, number, number];
@@ -27,17 +20,28 @@ export default function DraggableFurniture({
   model_id,
 }: DraggableFurnitureProps) {
   const groupRef = useRef<THREE.Group>(null);
-  const { raycaster } = useThree();
+  const { raycaster, camera } = useThree();
+
+  const roomWidth = useStore((state) => state.roomWidth) || 6;
+  const roomDepth = useStore((state) => state.roomDepth) || 6;
+  const roomHeight = useStore((state) => state.roomHeight) || 2.8;
+
+  const halfWidth = roomWidth / 2;
+  const halfDepth = roomDepth / 2;
 
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [hoverRotate, setHoverRotate] = useState(false); // 旋转手柄的悬浮状态
   const [draggingRotate, setDraggingRotate] = useState(false); // 是否正在旋转
 
+  // 高度手柄的悬浮与拖拽状态
+  const [hoverHeight, setHoverHeight] = useState(false);
+  const [draggingHeight, setDraggingHeight] = useState(false);
+
   const [modelSize, setModelSize] = useState<[number, number, number]>([
     1, 1, 1,
   ]);
-  const dragOffset = useRef({ x: 0, z: 0 });
+  const dragOffset = useRef({ x: 0, y: 0, z: 0 });
 
   // 局部状态：分别驱动“移动”和“旋转”的丝滑渲染
   const [livePos, setLivePos] =
@@ -45,13 +49,16 @@ export default function DraggableFurniture({
   const [liveRotY, setLiveRotY] = useState<number>(rotation[1] || 0);
 
   // 通过初始高度判断它属于哪个“物理图层”
-  const isCeilingItem = initialPosition[1] >= ROOM_HEIGHT - 0.5;
+  const [isCeilingAnchor] = useState(
+    () => initialPosition[1] >= roomHeight - 0.5,
+  );
 
   // 智能计算模型与碰撞盒的 Y 轴偏移量
   // 1. 模型偏移：天上家具往下移动自身高度(倒挂)，地上家具不移动(坐落)
-  const modelOffsetY = isCeilingItem ? -modelSize[1] : 0;
+  const modelOffsetY = isCeilingAnchor ? -modelSize[1] : 0;
   // 2. 盒子偏移：天上家具盒子中心在负半轴，地上家具盒子中心在正半轴
-  const boxOffsetY = isCeilingItem ? -modelSize[1] / 2 : modelSize[1] / 2;
+  const boxOffsetY = isCeilingAnchor ? -modelSize[1] / 2 : modelSize[1] / 2;
+  const myCenterY = livePos[1] + boxOffsetY;
 
   // 当外部数据源更新时同步
   useEffect(() => {
@@ -74,6 +81,7 @@ export default function DraggableFurniture({
   useCursor(hovered, 'grab', 'auto');
   useCursor(dragging, 'grabbing', 'auto');
   useCursor(hoverRotate, 'pointer', 'auto');
+  useCursor(hoverHeight, 'ns-resize', 'auto');
 
   const handleModelLoad = useCallback(
     (size: [number, number, number]) => {
@@ -91,18 +99,20 @@ export default function DraggableFurniture({
     event.stopPropagation();
 
     if (active && groupRef.current) {
+      // 🌟 创建动态水平拖拽面：让玻璃板永远悬浮在家具当前的高度，彻底消除透视错位
+      const horizontalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(0, livePos[1], 0),
+      );
+
       const intersection = new THREE.Vector3();
 
-      // 动态切换射线检测平面：如果是吊灯，就射向天花板
-      const activePlane = isCeilingItem ? ceilingPlane : floorPlane;
-      raycaster.ray.intersectPlane(activePlane, intersection);
+      raycaster.ray.intersectPlane(horizontalPlane, intersection);
 
       if (intersection) {
         if (first) {
-          dragOffset.current = {
-            x: groupRef.current.position.x - intersection.x,
-            z: groupRef.current.position.z - intersection.z,
-          };
+          dragOffset.current.x = groupRef.current.position.x - intersection.x;
+          dragOffset.current.z = groupRef.current.position.z - intersection.z;
         }
 
         let targetX = intersection.x + dragOffset.current.x;
@@ -117,10 +127,10 @@ export default function DraggableFurniture({
           Math.abs(Math.sin(rotY) * modelSize[0]) +
           Math.abs(Math.cos(rotY) * modelSize[2]);
 
-        const maxBoundX = ROOM_HALF - wX / 2;
-        const maxBoundZ = ROOM_HALF - wZ / 2;
-        const minBoundX = -(ROOM_HALF - wX / 2);
-        const minBoundZ = -(ROOM_HALF - wZ / 2);
+        const maxBoundX = halfWidth - wX / 2;
+        const maxBoundZ = halfDepth - wZ / 2;
+        const minBoundX = -(halfWidth - wX / 2);
+        const minBoundZ = -(halfDepth - wZ / 2);
 
         targetX = THREE.MathUtils.clamp(targetX, minBoundX + 0.05, maxBoundX);
         targetZ = THREE.MathUtils.clamp(targetZ, minBoundZ + 0.05, maxBoundZ);
@@ -129,37 +139,48 @@ export default function DraggableFurniture({
         for (const other of placedItems) {
           if (other.instanceId === instanceId || !other.size) continue;
 
-          //  物理隔离：天上和地下的东西互不干涉，绝不碰撞
-          const isOtherCeiling = other.position[1] >= ROOM_HEIGHT - 0.5;
-          if (isCeilingItem !== isOtherCeiling) continue;
+          const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
+          const otherBoxOffsetY = isOtherCeiling
+            ? -other.size[1] / 2
+            : other.size[1] / 2;
+          const otherCenterY = other.position[1] + otherBoxOffsetY;
 
-          const oRotY = other.rotation ? other.rotation[1] : 0;
-          const oWx =
-            Math.abs(Math.cos(oRotY) * other.size[0]) +
-            Math.abs(Math.sin(oRotY) * other.size[2]);
-          const oWz =
-            Math.abs(Math.sin(oRotY) * other.size[0]) +
-            Math.abs(Math.cos(oRotY) * other.size[2]);
+          const gapY = Math.abs(myCenterY - otherCenterY);
+          const isYColliding = gapY < (modelSize[1] + other.size[1]) / 2;
 
-          const gapX = Math.abs(targetX - other.position[0]);
-          const gapZ = Math.abs(targetZ - other.position[2]);
+          // 只有当高度(Y)重叠时，才去检查水平(X,Z)是否相撞
+          if (isYColliding) {
+            const oRotY = other.rotation ? other.rotation[1] : 0;
+            const oWx =
+              Math.abs(Math.cos(oRotY) * other.size[0]) +
+              Math.abs(Math.sin(oRotY) * other.size[2]);
+            const oWz =
+              Math.abs(Math.sin(oRotY) * other.size[0]) +
+              Math.abs(Math.cos(oRotY) * other.size[2]);
 
-          if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
-            isColliding = true;
-            break;
+            const gapX = Math.abs(targetX - other.position[0]);
+            const gapZ = Math.abs(targetZ - other.position[2]);
+
+            if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
+              isColliding = true;
+              break;
+            }
           }
         }
 
         if (!isColliding) {
           for (const obs of staticObstacles) {
-            const gapX = Math.abs(targetX - obs.x);
-            const gapZ = Math.abs(targetZ - obs.z);
+            const gapY = Math.abs(myCenterY - (obs.y || 0)); // 兼容旧缓存
+            const obsH = obs.h || roomHeight;
+            const isYColliding = gapY < (modelSize[1] + obsH) / 2;
 
-            // 你的沙发宽度是 wX，障碍物宽度是 obs.w
-            if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
-              isColliding = true;
-              console.log('撞到内置家具了！阻止移动！', obs.id); // 加上这行日志
-              break;
+            if (isYColliding) {
+              const gapX = Math.abs(targetX - obs.x);
+              const gapZ = Math.abs(targetZ - obs.z);
+              if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
+                isColliding = true;
+                break;
+              }
             }
           }
         }
@@ -167,7 +188,7 @@ export default function DraggableFurniture({
         if (!isColliding) {
           groupRef.current.position.x = targetX;
           groupRef.current.position.z = targetZ;
-          setLivePos([targetX, initialPosition[1], targetZ]);
+          setLivePos([targetX, livePos[1], targetZ]);
         }
       }
     } else if (!active && groupRef.current) {
@@ -183,25 +204,62 @@ export default function DraggableFurniture({
     setDraggingRotate(active);
 
     if (active && groupRef.current) {
+      const horizontalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(0, livePos[1], 0),
+      );
       const intersection = new THREE.Vector3();
-      // 旋转时也用对应的平面
-      const activePlane = isCeilingItem ? ceilingPlane : floorPlane;
-      raycaster.ray.intersectPlane(activePlane, intersection);
+      raycaster.ray.intersectPlane(horizontalPlane, intersection);
 
       if (intersection) {
-        // 计算鼠标当前位置与家具中心点的 X 和 Z 差值
         const dx = intersection.x - groupRef.current.position.x;
         const dz = intersection.z - groupRef.current.position.z;
-
-        // 核心公式：利用反正切求出鼠标围绕家具的精确弧度
-        const angle = Math.atan2(dx, dz);
-
-        // 实时更新局部状态，画面立刻响应
-        setLiveRotY(angle);
+        setLiveRotY(Math.atan2(dx, dz));
       }
     } else if (!active && groupRef.current) {
-      // 鼠标松开时，将最终的旋转角度持久化到 Zustand
       updateItemRotation(instanceId, [rotation[0], liveRotY, rotation[2]]);
+    }
+  });
+
+  // 垂直高度升降逻辑
+  const bindHeight = useDrag(({ active, event, first }) => {
+    event.stopPropagation();
+    setIsDragging(active);
+    setDraggingHeight(active);
+
+    if (active && groupRef.current) {
+      // 创建一个永远垂直、并正对相机的隐形拖拽检测面
+      const camDir = new THREE.Vector3();
+      camera.getWorldDirection(camDir);
+      camDir.y = 0; // 抹平相机的俯仰角，只保留水平朝向
+      camDir.normalize().negate(); // 箭头指向相机
+
+      // 这个面通过家具现在的坐标
+      const verticalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        camDir,
+        groupRef.current.position,
+      );
+
+      const intersection = new THREE.Vector3();
+      raycaster.ray.intersectPlane(verticalPlane, intersection);
+
+      if (intersection) {
+        if (first) {
+          dragOffset.current.y = groupRef.current.position.y - intersection.y;
+        }
+
+        let targetY = intersection.y + dragOffset.current.y;
+
+        // 防穿模保护：家具不能陷进地下，也不能戳破天花板
+        const minY = isCeilingAnchor ? modelSize[1] : 0;
+        const maxY = isCeilingAnchor ? roomHeight : roomHeight - modelSize[1];
+        targetY = THREE.MathUtils.clamp(targetY, minY, Math.max(minY, maxY));
+
+        setLivePos([livePos[0], targetY, livePos[2]]);
+      }
+    } else if (!active && groupRef.current) {
+      // 鼠标松开，持久化高度到状态机
+      updateItemPosition(instanceId, [livePos[0], livePos[1], livePos[2]]);
     }
   });
 
@@ -219,21 +277,26 @@ export default function DraggableFurniture({
   const aBack = livePos[2] - wZ / 2;
   const aFront = livePos[2] + wZ / 2;
 
-  // 2. 默认的距离（到四面墙壁）
-  let distLeft = aLeft - -ROOM_HALF;
-  let distRight = ROOM_HALF - aRight;
-  let distBack = aBack - -ROOM_HALF;
-  let distFront = ROOM_HALF - aFront;
+  let distLeft = aLeft - -halfWidth;
+  let distRight = halfWidth - aRight;
+  let distBack = aBack - -halfDepth;
+  let distFront = halfDepth - aFront;
 
   // 3. 遍历寻找距离当前家具最近的障碍物
   placedItems.forEach((other) => {
     if (other.instanceId === instanceId || !other.size) return;
 
-    // 尺寸测量的隔离：吊灯的测量线不应该被地上的沙发挡住
-    const isOtherCeiling = other.position[1] >= ROOM_HEIGHT - 0.5;
-    if (isCeilingItem !== isOtherCeiling) return;
+    const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
+    const otherBoxOffsetY = isOtherCeiling
+      ? -other.size[1] / 2
+      : other.size[1] / 2;
+    const otherCenterY = other.position[1] + otherBoxOffsetY;
 
-    // 计算其他家具(B)的真实占据边界
+    const gapY = Math.abs(myCenterY - otherCenterY);
+    const isYColliding = gapY < (modelSize[1] + other.size[1]) / 2;
+
+    if (!isYColliding) return; // 重点：高度不重叠直接放行！
+
     const oRotY = other.rotation ? other.rotation[1] : 0;
     const oWx =
       Math.abs(Math.cos(oRotY) * other.size[0]) +
@@ -247,38 +310,25 @@ export default function DraggableFurniture({
     const bBack = other.position[2] - oWz / 2;
     const bFront = other.position[2] + oWz / 2;
 
-    // 判断在 Z 轴或 X 轴上是否存在交集 (也就是判断是否位于正左/正前/等方向上)
-    const overlapZ = bBack < aFront && bFront > aBack; // 在水平射线上有遮挡
-    const overlapX = bLeft < aRight && bRight > aLeft; // 在垂直射线上有遮挡
+    const overlapZ = bBack < aFront && bFront > aBack;
+    const overlapX = bLeft < aRight && bRight > aLeft;
 
-    // 检查左侧：如果 B 在 A 的左侧，且存在 Z轴重叠
-    if (overlapZ && bRight <= aLeft) {
-      const d = aLeft - bRight;
-      if (d < distLeft) distLeft = d; // 取最近的距离
-    }
-    // 检查右侧：如果 B 在 A 的右侧，且存在 Z轴重叠
-    if (overlapZ && bLeft >= aRight) {
-      const d = bLeft - aRight;
-      if (d < distRight) distRight = d;
-    }
-    // 检查后侧：如果 B 在 A 的后侧，且存在 X轴重叠
-    if (overlapX && bFront <= aBack) {
-      const d = aBack - bFront;
-      if (d < distBack) distBack = d;
-    }
-    // 检查前侧：如果 B 在 A 的前侧，且存在 X轴重叠
-    if (overlapX && bBack >= aFront) {
-      const d = bBack - aFront;
-      if (d < distFront) distFront = d;
-    }
+    if (overlapZ && bRight <= aLeft)
+      distLeft = Math.min(distLeft, aLeft - bRight);
+    if (overlapZ && bLeft >= aRight)
+      distRight = Math.min(distRight, bLeft - aRight);
+    if (overlapX && bFront <= aBack)
+      distBack = Math.min(distBack, aBack - bFront);
+    if (overlapX && bBack >= aFront)
+      distFront = Math.min(distFront, bBack - aFront);
   });
 
-  const lineY = isCeilingItem ? -0.1 : 0.1;
+  const lineY = isCeilingAnchor ? -0.1 : 0.1;
 
   return (
     <group
       ref={groupRef}
-      position={initialPosition}
+      position={livePos}
       rotation={[rotation[0], liveRotY, rotation[2]]}
       onClick={(e) => {
         e.stopPropagation();
@@ -303,36 +353,68 @@ export default function DraggableFurniture({
         {isSelected && <Edges linewidth={1} color="white" />}
       </mesh>
 
-      {/* 自由旋转 UI 控制手柄  */}
+      {/* UI 控制手柄层  */}
       {isSelected && (
         <group>
-          {/* 连着手柄的线：从家具正前方往外伸 0.6米 */}
-          <Line
-            points={[
-              [0, lineY, modelSize[2] / 2],
-              [0, lineY, modelSize[2] / 2 + 0.4],
-            ]}
-            color="white"
-            lineWidth={1.5}
-          />
-          {/* 拖拽手柄圆盘 */}
-          <mesh
-            position={[0, lineY, modelSize[2] / 2 + 0.4]}
-            {...(bindRotate() as any)}
-            onPointerOver={(e) => {
-              e.stopPropagation();
-              setHoverRotate(true);
-            }}
-            onPointerOut={(e) => {
-              e.stopPropagation();
-              setHoverRotate(false);
-            }}
-          >
-            <cylinderGeometry args={[0.15, 0.15, 0.05, 32]} />
-            <meshBasicMaterial
-              color={hoverRotate || draggingRotate ? '#888888' : 'white'}
+          {/* 旋转手柄  */}
+          <group>
+            <Line
+              points={[
+                [0, lineY, modelSize[2] / 2],
+                [0, lineY, modelSize[2] / 2 + 0.4],
+              ]}
+              color="white"
+              lineWidth={1.5}
             />
-          </mesh>
+            {/* 拖拽手柄圆盘 */}
+            <mesh
+              position={[0, lineY, modelSize[2] / 2 + 0.4]}
+              {...(bindRotate() as any)}
+              onPointerOver={(e) => {
+                e.stopPropagation();
+                setHoverRotate(true);
+              }}
+              onPointerOut={(e) => {
+                e.stopPropagation();
+                setHoverRotate(false);
+              }}
+            >
+              <cylinderGeometry args={[0.15, 0.15, 0.05, 32]} />
+              <meshBasicMaterial
+                color={hoverRotate || draggingRotate ? '#888888' : 'white'}
+              />
+            </mesh>
+          </group>
+
+          {/* 高度调节手柄 (正上方) */}
+          <group position={[0, boxOffsetY + modelSize[1] / 2 + 0.2, 0]}>
+            <Line
+              points={[
+                [0, 0, 0],
+                [0, 0.5, 0],
+              ]}
+              color="white"
+              lineWidth={1.5}
+            />
+            <mesh
+              position={[0, 0.5, 0]}
+              {...(bindHeight() as any)}
+              onPointerOver={(e) => {
+                e.stopPropagation();
+                setHoverHeight(true);
+              }}
+              onPointerOut={(e) => {
+                e.stopPropagation();
+                setHoverHeight(false);
+              }}
+            >
+              {/* 向上指向的圆锥体，代表拉升 */}
+              <coneGeometry args={[0.15, 0.3, 32]} />
+              <meshBasicMaterial
+                color={hoverHeight || draggingHeight ? '#888888' : 'white'}
+              />
+            </mesh>
+          </group>
         </group>
       )}
 

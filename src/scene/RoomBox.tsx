@@ -53,7 +53,11 @@ export default function RoomBox({
         }
       }
     });
-    const box = floorBox || new THREE.Box3().setFromObject(clone);
+    const roomBox3 = new THREE.Box3().setFromObject(clone);
+    const roomSize = new THREE.Vector3();
+    roomBox3.getSize(roomSize);
+
+    const box = floorBox || roomBox3;
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
     box.getSize(size);
@@ -61,8 +65,9 @@ export default function RoomBox({
     const info = {
       width: size.x,
       depth: size.z,
+      height: roomSize.y,
       cx: center.x,
-      cy: center.y,
+      cy: roomBox3.min.y, // 以房间底部为基准
       cz: center.z,
     };
     log(`floorInfo computed for ${glbUrl}`, info);
@@ -72,7 +77,7 @@ export default function RoomBox({
   useLayoutEffect(() => {
     log(`${glbUrl} mounted, visible=${visible}`);
     if (floorInfo.width > 0.5 && floorInfo.depth > 0.5) {
-      setRoomSize(floorInfo.width, floorInfo.depth);
+      setRoomSize(floorInfo.width, floorInfo.depth, floorInfo.height);
     }
   }, [floorInfo, setRoomSize, glbUrl, visible]);
 
@@ -107,10 +112,11 @@ export default function RoomBox({
 
         obstacles.push({
           id: child.name || Math.random().toString(36).substring(7),
-          // 💡 看这里！直接用 center.x，不需要再减去任何偏移量了！引擎全帮你算好了！
           x: center.x,
+          y: center.y,
           z: center.z,
           w: size.x,
+          h: size.y,
           d: size.z,
         });
       }

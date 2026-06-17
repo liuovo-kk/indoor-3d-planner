@@ -9,12 +9,21 @@ import CameraRig from './CameraRig';
 import DraggableFurniture from './DraggableFurniture';
 import * as THREE from 'three';
 import RightToolbar from '../components/RightToolbar';
+import { useCollabSync } from '../hooks/useCollabSync';
+import rooms, { DEFAULT_ROOM } from './rooms';
+
+const log = (msg: string, data?: unknown) =>
+  console.log(
+    `[RoomScene] ${msg}`,
+    data ?? '',
+    `+${Date.now() - performance.now()}ms`,
+  );
 
 export default function RoomScene() {
+  useCollabSync();
   // 从 Store 获取 3D 场景需要的数据和方法
   const placedItems = useStore((state) => state.placedItems);
   const currentScene = useStore((state) => state.currentScene);
-  // const addPlacedItem = useStore((state) => state.addPlacedItem);
   const viewMode = useStore((state) => state.viewMode);
 
   const isDragging = useStore((state) => state.isDragging);
@@ -24,16 +33,19 @@ export default function RoomScene() {
   const removePlacedItem = useStore((state) => state.removePlacedItem);
   const setSelectedItemId = useStore((state) => state.setSelectedItemId);
 
+  useEffect(() => {
+    log(`currentScene changed to "${currentScene}"`);
+  }, [currentScene]);
+
   //  监听全局键盘 Delete 和 Backspace 键
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 避坑：如果用户正在输入框里打字，绝对不要触发家具删除！
       const target = e.target as HTMLElement;
       if (['input', 'textarea'].includes(target.tagName.toLowerCase())) {
         return;
       }
 
-      // 如果按了删除键/退格键，并且有选中的家具，就干掉它
+      // 如果按了删除键/退格键，并且有选中的家具，就删除
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItemId) {
         removePlacedItem(selectedItemId);
       }
@@ -94,11 +106,16 @@ export default function RoomScene() {
 
         {/* 主场景（默认房间 + 环境 + 家具）同一个 Suspense */}
         <Suspense fallback={null}>
-          <RoomBox
-            glbUrl="/models/GuestRoomBox.glb"
-            visible={currentScene === 'guestroom'}
-            onFloorClick={() => setSelectedItemId(null)}
-          />
+          {rooms
+            .filter((r) => r.id === DEFAULT_ROOM)
+            .map((room) => (
+              <RoomBox
+                key={room.id}
+                glbUrl={`/models/${room.glbFile}`}
+                visible={currentScene === room.id}
+                onFloorClick={() => setSelectedItemId(null)}
+              />
+            ))}
           <Environment files="/assets/indoor.hdr" />
           {placedItems.map((item) => (
             <DraggableFurniture
@@ -111,15 +128,17 @@ export default function RoomScene() {
           ))}
         </Suspense>
 
-        {/* BIGROOM 独立 Suspense，后台加载不影响主场景 */}
-        <Suspense fallback={null}>
-          <RoomBox
-            glbUrl="/models/BIGROOM.glb"
-            visible={currentScene === 'bigroom'}
-            onFloorClick={() => setSelectedItemId(null)}
-            roomRotation={[0, Math.PI, 0]} //沿 Y 轴旋转 180 度
-          />
-        </Suspense>
+        {/* ==================== 渲染其他独立场景 ==================== */}
+        {rooms.filter((r) => r.id !== DEFAULT_ROOM).map((room) => (
+          <Suspense key={room.id} fallback={null}>
+            <RoomBox
+              glbUrl={`/models/${room.glbFile}`}
+              visible={currentScene === room.id}
+              onFloorClick={() => setSelectedItemId(null)}
+              // 💡 同样去掉了 roomRotation 补丁
+            />
+          </Suspense>
+        ))}
       </Canvas>
       <RightToolbar />
       {/* <Minimap /> */}
@@ -127,7 +146,7 @@ export default function RoomScene() {
   );
 }
 
-// 🛠️ 专门用来调试的红色线框组件
+// 调试的红色线框组件
 function DebugObstacles() {
   const staticObstacles = useStore((state) => state.staticObstacles);
 

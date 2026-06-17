@@ -1,4 +1,5 @@
 // src/components/RightHeader.tsx
+import { useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,10 +14,7 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 
-const SCENE_LIST = [
-  { id: 'guestroom', name: '次卧场景' },
-  { id: 'bigroom', name: '主卧场景' },
-];
+import rooms, { floorOrder } from '../scene/rooms';
 
 export default function RightHeader() {
   const {
@@ -36,8 +34,26 @@ export default function RightHeader() {
   const onlineUsers = useStore((s) => s.onlineUsers);
   const setCollabEnabled = useStore((s) => s.setCollabEnabled);
 
+  const [isSceneMenuOpen, setIsSceneMenuOpen] = useState(false);
+  const [expandedFloors, setExpandedFloors] = useState<Record<string, boolean>>(
+    {},
+  );
+
+  // 动态获取当前场景的 Label，如果找不到就显示“未命名场景”
   const currentSceneName =
-    SCENE_LIST.find((s) => s.id === currentScene)?.name || '未命名场景';
+    rooms.find((r) => r.id === currentScene)?.label || '未命名场景';
+
+  // 展开/收起楼层的函数（阻止事件冒泡，防止点击时关闭整个菜单）
+  const toggleFloor = (e: React.MouseEvent, floor: string) => {
+    e.stopPropagation();
+    setExpandedFloors((prev) => ({ ...prev, [floor]: !prev[floor] }));
+  };
+
+  // 点击具体房间的函数
+  const handleSelectRoom = (roomId: string) => {
+    setCurrentScene(roomId);
+    setIsSceneMenuOpen(false); // 切换后自动关闭菜单
+  };
 
   const handleSaveAndExport = () => {
     // 鉴权拦截
@@ -57,46 +73,6 @@ export default function RightHeader() {
     saveCurrentScene();
 
     alert(`【${currentSceneName}】已成功保存！`);
-
-    const syncData = {
-      scene_id: currentScene,
-      timestamp: Date.now(),
-      items: placedItems.map((item) => {
-        const currentRotY = item.rotation ? item.rotation[1] : 0;
-
-        return {
-          instance_id: item.instanceId,
-          model_id: item.model_id,
-          // 核心：Z 轴取反 (适配 Unity 左手坐标系)
-          position: {
-            x: Number(item.position[0].toFixed(3)),
-            y: Number(item.position[1].toFixed(3)),
-            z: Number((-item.position[2]).toFixed(3)),
-          },
-          // 核心：弧度转角度，Y 轴取反
-          rotation: {
-            x: 0,
-            y: Number((-currentRotY * (180 / Math.PI)).toFixed(3)),
-            z: 0,
-          },
-          scale: { x: 1, y: 1, z: 1 },
-        };
-      }),
-    };
-
-    // // 将 JSON 对象变成文件下载到本地
-    // const dataStr =
-    //   'data:text/json;charset=utf-8,' +
-    //   encodeURIComponent(JSON.stringify(syncData, null, 2));
-    // const downloadAnchorNode = document.createElement('a');
-    // downloadAnchorNode.setAttribute('href', dataStr);
-    // downloadAnchorNode.setAttribute('download', 'vr_scene_sync.json');
-    // document.body.appendChild(downloadAnchorNode);
-    // downloadAnchorNode.click();
-    // downloadAnchorNode.remove();
-
-    // console.log('VR 同步数据已导出:', syncData);
-    // alert('VR 场景数据已导出！请将下载的 JSON 文件发给 Unity 端进行测试。');
   };
 
   const handleExportModel = () => {
@@ -123,40 +99,102 @@ export default function RightHeader() {
       </button>
 
       <div className="flex items-center gap-2 ml-4">
-        <div className="font-bold text-base flex items-center gap-2 cursor-pointer ml-4">
-          My Room
-        </div>
-        <div className="relative group flex items-center cursor-pointer h-full py-4">
-          <div className="flex items-center gap-2 text-sm font-bold text-gray-700 hover:text-[#0058a3] transition-colors bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
-            <Map size={16} className="text-gray-400" />
+        <div className="relative flex items-center h-full py-4 ml-2">
+          {/* 触发按钮 */}
+          <div
+            onClick={() => setIsSceneMenuOpen(!isSceneMenuOpen)}
+            className={`flex items-center gap-2 text-sm font-bold transition-colors px-4 py-2 rounded-lg border cursor-pointer select-none
+              ${isSceneMenuOpen ? 'bg-blue-50 border-blue-200 text-[#0058a3]' : 'bg-gray-50 border-gray-100 text-gray-700 hover:text-[#0058a3]'}`}
+          >
+            <Map
+              size={16}
+              className={isSceneMenuOpen ? 'text-[#0058a3]' : 'text-gray-400'}
+            />
             {currentSceneName}
             <ChevronDown
               size={14}
-              className="text-gray-400 group-hover:rotate-180 transition-transform duration-200 ml-1"
+              className={`transition-transform duration-200 ml-1 ${isSceneMenuOpen ? 'rotate-180 text-[#0058a3]' : 'text-gray-400'}`}
             />
           </div>
 
-          <div className="absolute top-[85%] left-0 pt-2 w-44 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-            <div className="bg-white border border-gray-100 rounded-xl shadow-lg overflow-hidden flex flex-col p-1">
-              {SCENE_LIST.map((scene) => (
-                <button
-                  key={scene.id}
-                  onClick={() => setCurrentScene(scene.id)}
-                  className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 font-bold rounded-lg transition-colors hover:bg-blue-50 ${
-                    currentScene === scene.id
-                      ? 'text-[#157fe2] bg-blue-50/50'
-                      : 'text-gray-600'
-                  }`}
-                >
-                  {scene.name}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* 下拉菜单与隐形遮罩 */}
+          {isSceneMenuOpen && (
+            <>
+              {/* 隐形全屏遮罩：点击菜单外部任意区域即可关闭菜单 */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setIsSceneMenuOpen(false)}
+              />
+
+              {/* 真正的下拉树状菜单 */}
+              <div className="absolute top-[85%] left-0 pt-2 w-64 z-50">
+                <div className="bg-white border border-gray-100 rounded-xl shadow-xl p-3 max-h-[60vh] overflow-y-auto flex flex-col custom-scrollbar">
+                  <div className="font-bold text-xs mb-3 text-gray-400 uppercase tracking-widest pl-2">
+                    House Structure
+                  </div>
+
+                  {/* 遍历渲染楼层与房间 */}
+                  {floorOrder.map((floor) => {
+                    const floorRooms = rooms.filter((r) => r.floor === floor);
+                    if (floorRooms.length === 0) return null;
+
+                    const floorLabel = floorRooms[0]?.floorLabel || floor;
+                    const isExpanded = expandedFloors[floor] ?? true; // 默认展开
+                    const floorHasActive = floorRooms.some(
+                      (r) => r.id === currentScene,
+                    );
+
+                    return (
+                      <div key={floor} className="mb-1">
+                        {/* 楼层标题按钮 */}
+                        <button
+                          onClick={(e) => toggleFloor(e, floor)}
+                          className={`flex items-center gap-1.5 w-full text-left py-2 px-2 rounded-lg text-sm font-bold transition-colors hover:bg-gray-50 cursor-pointer ${
+                            floorHasActive ? 'text-black' : 'text-gray-400'
+                          }`}
+                        >
+                          {isExpanded ? (
+                            <ChevronDown size={14} />
+                          ) : (
+                            <ChevronRight size={14} />
+                          )}
+                          {floor} {floorLabel}
+                        </button>
+
+                        {/* 楼层下的房间列表 */}
+                        {isExpanded && (
+                          <div className="flex flex-col gap-0.5 mt-0.5">
+                            {floorRooms.map((room) => (
+                              <button
+                                key={room.id}
+                                onClick={() => handleSelectRoom(room.id)}
+                                className={`flex items-center gap-2 w-full text-left py-2 pl-8 pr-2 rounded-lg text-sm transition-colors cursor-pointer
+                                  ${
+                                    room.id === currentScene
+                                      ? 'bg-blue-50 text-[#157fe2] font-bold'
+                                      : 'hover:bg-gray-50 text-gray-600'
+                                  }`}
+                              >
+                                {room.id === currentScene ? (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#157fe2] shrink-0" />
+                                ) : (
+                                  <span className="w-1.5 h-1.5 shrink-0" />
+                                )}
+                                <span className="truncate">{room.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-6">
-        {/* 一排图标组合 */}
         <div className="flex items-center gap-5 text-black">
           <div
             className="relative cursor-pointer hover:opacity-70 group"
@@ -170,7 +208,14 @@ export default function RightHeader() {
             }
           >
             <Headset size={22} strokeWidth={2} />
-            <span className="absolute 0 right-0 w-2 h-2 bg-green-500 rounded-full border border-white"></span>
+            <span
+              className={`absolute top-0 right-0 w-2.5 h-2.5 rounded-full border border-white ${collabEnabled ? (collabConnected ? 'bg-green-500' : 'bg-yellow-400') : 'bg-gray-300'}`}
+            ></span>
+            {collabEnabled && collabConnected && onlineUsers > 0 && (
+              <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] font-bold text-green-600 whitespace-nowrap">
+                {onlineUsers}
+              </span>
+            )}
           </div>
           <ShoppingBasket
             size={22}
@@ -187,7 +232,7 @@ export default function RightHeader() {
           <Download
             size={22}
             strokeWidth={2}
-            className="cursor-pointer hover:opacity-70 text-black hover:text-green-600 transition-colors"
+            className="cursor-pointer hover:opacity-70 text-black hover:text-blue-600 transition-colors"
             onClick={handleExportModel}
             // title="导出为 3D 模型文件 (GLB)"
           />

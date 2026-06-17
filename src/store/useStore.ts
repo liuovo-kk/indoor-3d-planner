@@ -11,8 +11,10 @@ export interface UserInfo {
 export interface StaticObstacle {
   id: string;
   x: number;
+  y: number;
   z: number;
   w: number;
+  h: number;
   d: number;
 }
 
@@ -77,7 +79,8 @@ interface AppState {
   // --- 房间尺寸（由 RoomBox 动态检测后设置） ---
   roomWidth: number;
   roomDepth: number;
-  setRoomSize: (w: number, d: number) => void;
+  roomHeight: number;
+  setRoomSize: (w: number, d: number, h: number) => void;
 
   // --- 场景切换与多房间状态隔离 ---
   currentScene: string; // 改成 string 以支持无限多房间
@@ -239,10 +242,11 @@ const useStore = create<AppState>((set) => ({
   // --- 房间尺寸初始值 ---
   roomWidth: 6,
   roomDepth: 6,
-  setRoomSize: (w, d) => set({ roomWidth: w, roomDepth: d }),
+  roomHeight: 2.8,
+  setRoomSize: (w, d, h) => set({ roomWidth: w, roomDepth: d, roomHeight: h }),
 
   // --- 场景切换与隔离实现 ---
-  currentScene: 'guestroom', // 默认场景
+  currentScene: 'Bedroom_girl', // 默认场景
   savedScenes: {}, // 初始为空字典
 
   // 保存当前房间：以 sceneId 为 key，存入当前的 placedItems
