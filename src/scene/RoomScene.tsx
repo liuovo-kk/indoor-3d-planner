@@ -111,12 +111,12 @@ export default function RoomScene() {
             .map((room) => (
               <RoomBox
                 key={room.id}
-                glbUrl={`/models/${room.glbFile}`}
+                glbUrl={`./assets/models/${room.glbFile}`}
                 visible={currentScene === room.id}
                 onFloorClick={() => setSelectedItemId(null)}
               />
             ))}
-          <Environment files="/assets/indoor.hdr" />
+          <Environment files="./assets/indoor.hdr" />
           {placedItems.map((item) => (
             <DraggableFurniture
               key={item.instanceId}
@@ -129,16 +129,17 @@ export default function RoomScene() {
         </Suspense>
 
         {/* ==================== 渲染其他独立场景 ==================== */}
-        {rooms.filter((r) => r.id !== DEFAULT_ROOM).map((room) => (
-          <Suspense key={room.id} fallback={null}>
-            <RoomBox
-              glbUrl={`/models/${room.glbFile}`}
-              visible={currentScene === room.id}
-              onFloorClick={() => setSelectedItemId(null)}
-              // 💡 同样去掉了 roomRotation 补丁
-            />
-          </Suspense>
-        ))}
+        {rooms
+          .filter((r) => r.id !== DEFAULT_ROOM)
+          .map((room) => (
+            <Suspense key={room.id} fallback={null}>
+              <RoomBox
+                glbUrl={`./assets/models/${room.glbFile}`}
+                visible={currentScene === room.id}
+                onFloorClick={() => setSelectedItemId(null)}
+              />
+            </Suspense>
+          ))}
       </Canvas>
       <RightToolbar />
       {/* <Minimap /> */}
