@@ -255,7 +255,77 @@ export default function DraggableFurniture({
         const maxY = isCeilingAnchor ? roomHeight : roomHeight - modelSize[1];
         targetY = THREE.MathUtils.clamp(targetY, minY, Math.max(minY, maxY));
 
-        setLivePos([livePos[0], targetY, livePos[2]]);
+        // 垂直方向的 3D 穿模检测
+        const rotY = rotation[1] || 0;
+        const wX =
+          Math.abs(Math.cos(rotY) * modelSize[0]) +
+          Math.abs(Math.sin(rotY) * modelSize[2]);
+        const wZ =
+          Math.abs(Math.sin(rotY) * modelSize[0]) +
+          Math.abs(Math.cos(rotY) * modelSize[2]);
+
+        // 预测未来的绝对中心点高度
+        const targetCenterY = targetY + boxOffsetY;
+
+        let isColliding = false;
+
+        // 1. 检测是否会撞到其他【动态家具】
+        for (const other of placedItems) {
+          if (other.instanceId === instanceId || !other.size) continue;
+
+          const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
+          if (isCeilingAnchor !== isOtherCeiling) continue;
+
+          const oRotY = other.rotation ? other.rotation[1] : 0;
+          const oWx =
+            Math.abs(Math.cos(oRotY) * other.size[0]) +
+            Math.abs(Math.sin(oRotY) * other.size[2]);
+          const oWz =
+            Math.abs(Math.sin(oRotY) * other.size[0]) +
+            Math.abs(Math.cos(oRotY) * other.size[2]);
+
+          // 在垂直拖拽时，水平位置是固定的，先判断 X 和 Z 轴是否重叠
+          const gapX = Math.abs(livePos[0] - other.position[0]);
+          const gapZ = Math.abs(livePos[2] - other.position[2]);
+
+          if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
+            // 如果 XZ 重叠，说明它们处于正上下方的关系，此时检查未来高度是否会“撞车”
+            const otherBoxOffsetY = isOtherCeiling
+              ? -other.size[1] / 2
+              : other.size[1] / 2;
+            const otherCenterY = other.position[1] + otherBoxOffsetY;
+
+            const gapY = Math.abs(targetCenterY - otherCenterY);
+            if (gapY < (modelSize[1] + other.size[1]) / 2) {
+              isColliding = true; // 发生穿模！
+              break;
+            }
+          }
+        }
+
+        // 2. 检测是否会撞到内置【静态障碍物】（比如墙体凸起、内置衣柜）
+        if (!isColliding) {
+          const staticObstacles = useStore.getState().staticObstacles;
+          for (const obs of staticObstacles) {
+            const gapX = Math.abs(livePos[0] - obs.x);
+            const gapZ = Math.abs(livePos[2] - obs.z);
+
+            if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
+              const obsH = obs.h || roomHeight;
+              const gapY = Math.abs(targetCenterY - (obs.y || 0));
+
+              if (gapY < (modelSize[1] + obsH) / 2) {
+                isColliding = true;
+                break;
+              }
+            }
+          }
+        }
+
+        // 只有没撞到任何东西，才允许它上升/下降
+        if (!isColliding) {
+          setLivePos([livePos[0], targetY, livePos[2]]);
+        }
       }
     } else if (!active && groupRef.current) {
       // 鼠标松开，持久化高度到状态机
