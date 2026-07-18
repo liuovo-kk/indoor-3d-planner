@@ -110,6 +110,10 @@ interface AppState {
 
   currentRecommendItem: FurnitureData | null;
   setCurrentRecommendItem: (item: FurnitureData | null) => void;
+
+  // --- AI 对话上下文 ---
+  conversationId: string | null;
+  setConversationId: (id: string | null) => void;
 }
 
 // 创建 Store
@@ -317,6 +321,9 @@ const useStore = create<AppState>((set) => ({
 
   currentRecommendItem: null,
   setCurrentRecommendItem: (item) => set({ currentRecommendItem: item }),
+
+  conversationId: null,
+  setConversationId: (id) => set({ conversationId: id }),
 
   staticObstacles: [],
   setStaticObstacles: (obs) => set({ staticObstacles: obs }),
