@@ -56,28 +56,53 @@ export default function AILayoutPanel() {
 
       const data = await response.json();
 
+      console.log('后端返回的完整原始数据:', data);
+
       if (data.conversation_id) {
         setConversationId(data.conversation_id);
       }
 
       if (data.answer) {
         try {
-          const parsedAnswer = JSON.parse(data.answer);
-          setAiResult(parsedAnswer);
-        } catch (e) {
-          console.warn('解析 AI Answer JSON 失败', e);
+          const jsonMatch = data.answer.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsedAnswer = JSON.parse(jsonMatch[0]);
+            setAiResult(parsedAnswer);
+          }
+        } catch (err) {
+          console.error('正则提取 AI Answer 失败', err);
         }
       }
 
-      // 1. 清空当前房间家具
+      // 清空当前房间家具
       clearSceneItems(currentScene);
 
-      // 2. 提取并设置房间尺寸
-      if (data.scene_json?.room_size) {
-        setRoomSize(4, 4, 2.8); // 暂时固定为默认尺寸
+      // 直接读取房间尺寸
+      let roomW = 4,
+        roomD = 4,
+        roomH = 2.8; // 默认尺寸
+
+      const roomBBox = data.scene_json?.room_bbox_aabb;
+      const rSize = data.scene_json?.room_size;
+
+      if (roomBBox && roomBBox.min && roomBBox.max) {
+        // 使用真正的边界框来计算房间的长宽
+        roomW = roomBBox.max[0] - roomBBox.min[0];
+        roomD = roomBBox.max[2] - roomBBox.min[2];
+
+        // 高度用 rSize.y
+        roomH = rSize?.y || 2.8;
+      } else if (rSize && rSize.x !== undefined) {
+        // 兜底方案：如果没传 bbox，再勉强用 room_size
+        roomW = rSize.x;
+        roomD = rSize.z;
+        roomH = rSize.y || 2.8;
       }
 
-      // 3. 渲染边界框到场景
+      // 更新 3D 房间墙壁尺寸
+      setRoomSize(roomW, roomD, roomH);
+
+      // 渲染家具
       const bboxes = data.scene_json?.bboxes || [];
       bboxes.forEach((bbox: any) => {
         const q = bbox.rotation;
