@@ -1,83 +1,69 @@
-// src/scene/AsyncModel.tsx
-import { useEffect, useState, Suspense, useMemo } from 'react';
-import { useGLTF } from '@react-three/drei';
-import { fetchGlbModel } from '../api/model';
+import { useEffect, useRef, useState } from 'react';
+import { GLTFLoader } from 'three-stdlib';
 import * as THREE from 'three';
+import { fetchGlbModel } from '../api/model';
 
 interface AsyncModelProps {
   modelId: string;
-  onLoadSize: (size: [number, number, number]) => void;
+  onLoadSize?: (size: [number, number, number]) => void;
 }
-
-// 把占位用的灰盒子提取成一个小组件，方便复用
-const FallbackBox = () => (
-  <mesh position={[0, 0.5, 0]}>
-    <boxGeometry args={[0, 0, 0]} />
-    <meshStandardMaterial color="#cccccc" wireframe />
-  </mesh>
-);
 
 export default function AsyncModel({ modelId, onLoadSize }: AsyncModelProps) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [scene, setScene] = useState<THREE.Group | null>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const sizeReported = useRef<string | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
+    sizeReported.current = null;
 
-    const loadModel = async () => {
-      try {
-        // 直接调用方法，拿到纯粹的二进制数据
-        const blobData = await fetchGlbModel(modelId);
+    fetchGlbModel(modelId)
+      .then(async (blob) => {
+        if (cancelled) return;
+        const buffer = await blob.arrayBuffer();
+        const loader = new GLTFLoader();
+        loader.parse(
+          buffer,
+          '',
+          (gltf) => {
+            if (cancelled) return;
+            const gltfScene = gltf.scene;
 
-        if (isMounted) {
-          // 把二进制数据转换成浏览器内存里的临时下载链接
-          const url = URL.createObjectURL(blobData as unknown as Blob);
-          setBlobUrl(url);
-        }
-      } catch (error) {
-        console.error(`模型 ${modelId} 加载失败:`, error);
-      }
-    };
+            gltfScene.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                child.receiveShadow = true;
+                child.castShadow = true;
+              }
+            });
 
-    loadModel();
+            if (onLoadSize && sizeReported.current !== modelId) {
+              const box = new THREE.Box3().setFromObject(gltfScene);
+              const size = new THREE.Vector3();
+              box.getSize(size);
+              onLoadSize([size.x, size.y, size.z]);
+              sizeReported.current = modelId;
+            }
+
+            setScene(gltfScene);
+          },
+          (err) => {
+            console.error(
+              `[AsyncModel] Failed to parse GLB for ${modelId}:`,
+              err,
+            );
+          },
+        );
+      })
+      .catch((err) => {
+        console.error(`[AsyncModel] Failed to fetch GLB for ${modelId}:`, err);
+      });
 
     return () => {
-      isMounted = false;
-      // 离开房间或删除家具时，销毁临时链接，防止浏览器内存爆炸
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      cancelled = true;
     };
-  }, [modelId]);
+  }, [modelId, onLoadSize]);
 
-  if (!blobUrl) {
-    return <FallbackBox />;
-  }
+  if (!scene) return null;
 
-  return (
-    <Suspense fallback={<FallbackBox />}>
-      <RealGLTFModel url={blobUrl} onLoad={onLoadSize} />
-    </Suspense>
-  );
-}
-
-function RealGLTFModel({
-  url,
-  onLoad,
-}: {
-  url: string;
-  onLoad: (size: [number, number, number]) => void;
-}) {
-  const { scene } = useGLTF(url);
-  const clone = useMemo(() => scene.clone(), [scene]);
-
-  // 🌟 核心魔法：组件渲染完成时，自动测量模型的长宽高
-  useEffect(() => {
-    // 创建一个能包裹住整个模型的虚拟包围盒
-    const box = new THREE.Box3().setFromObject(clone);
-    const size = new THREE.Vector3();
-    box.getSize(size); // 拿到长宽高
-
-    // 把测量结果传给外面的父组件
-    onLoad([size.x, size.y, size.z]);
-  }, [clone]);
-
-  return <primitive object={clone} />;
+  return <primitive ref={groupRef} object={scene} />;
 }

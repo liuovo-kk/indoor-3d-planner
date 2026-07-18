@@ -1,7 +1,12 @@
 // src/components/RightToolbar.tsx
 import React from 'react';
 import useStore from '../store/useStore';
-import { Copy, RotateCw, Trash2, Maximize2, Edit3 } from 'lucide-react'; // 使用你项目中已有的 lucide-react 图标
+import { Copy, RotateCw, Trash2, Maximize2, Edit3 } from 'lucide-react';
+import {
+  sendCreateFurniture,
+  sendDragUpdate,
+  sendDeleteFurniture,
+} from '../hooks/useCollabSync';
 
 export default function RightToolbar() {
   const selectedItemId = useStore((state) => state.selectedItemId);
@@ -28,18 +33,55 @@ export default function RightToolbar() {
       <ToolbarButton
         icon={<Copy size={20} />}
         label="复制"
-        onClick={() => duplicateItem(selectedItemId)}
+        onClick={() => {
+          duplicateItem(selectedItemId);
+          const items = useStore.getState().placedItems;
+          const newItem = items[items.length - 1];
+          if (newItem) {
+            sendCreateFurniture(
+              newItem.model_id,
+              {
+                x: newItem.position[0],
+                y: newItem.position[1],
+                z: newItem.position[2],
+              },
+              { x: 0, y: 0, z: 0 },
+              newItem.instanceId,
+            );
+          }
+        }}
       />
       <ToolbarButton
         icon={<RotateCw size={20} />}
         label="旋转"
-        onClick={() => rotateItem(selectedItemId)}
+        onClick={() => {
+          rotateItem(selectedItemId);
+          const item = useStore
+            .getState()
+            .placedItems.find((p) => p.instanceId === selectedItemId);
+          if (item) {
+            const objectId = item.objectId || selectedItemId;
+            const rotY = item.rotation ? item.rotation[1] : 0;
+            sendDragUpdate(
+              objectId,
+              { x: item.position[0], y: item.position[1], z: item.position[2] },
+              { x: 0, y: rotY, z: 0 },
+            );
+          }
+        }}
       />
-      {/* 删除按钮可以用稍微不一样的颜色，或者保持统一的黑色 */}
       <ToolbarButton
         icon={<Trash2 size={20} />}
         label="删除"
-        onClick={() => removePlacedItem(selectedItemId)}
+        onClick={() => {
+          const objectId =
+            useStore
+              .getState()
+              .placedItems.find((p) => p.instanceId === selectedItemId)
+              ?.objectId || selectedItemId;
+          removePlacedItem(selectedItemId);
+          sendDeleteFurniture(objectId);
+        }}
       />
     </div>
   );
@@ -56,8 +98,6 @@ function ToolbarButton({ icon, label, onClick }: ToolbarButtonProps) {
   return (
     <button
       onClick={(e) => {
-        // 🛑 核心细节：阻止事件冒泡！
-        // 如果不加这个，点击按钮时会穿透点到地板上，导致选中状态被取消，按钮消失！
         e.stopPropagation();
         onClick();
       }}

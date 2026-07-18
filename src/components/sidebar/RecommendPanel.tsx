@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import useStore from '../../store/useStore';
 import { FurnitureData } from '../../types';
 import { ArrowLeft, Sparkles } from 'lucide-react';
+import { sendCreateFurniture } from '../../hooks/useCollabSync';
 
 export default function RecommendPanel() {
   const currentItem = useStore((state) => state.currentRecommendItem);
@@ -22,6 +23,14 @@ export default function RecommendPanel() {
       ],
     };
     addPlacedItem(newItem);
+
+    sendCreateFurniture(
+      item.model_id,
+      { x: newItem.position[0], y: newItem.position[1], z: newItem.position[2] },
+      { x: 0, y: 0, z: 0 },
+      newItem.instanceId,
+    );
+
     useStore.getState().setCurrentRecommendItem(item);
   };
 

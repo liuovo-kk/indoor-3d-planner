@@ -22,7 +22,7 @@ export default function RoomBox({
   onFloorClick,
   glbUrl,
   visible = true,
-  roomRotation = [0, 0, 0], // 默认不旋转
+  roomRotation = [0, 0, 0],
 }: RoomBoxProps) {
   const mountTime = useRef(Date.now());
   const { scene } = useGLTF(glbUrl);
@@ -31,7 +31,7 @@ export default function RoomBox({
 
   const groupRef = useRef<THREE.Group>(null);
   const setRoomSize = useStore((s) => s.setRoomSize);
-  const setStaticObstacles = useStore((s) => s.setStaticObstacles); //静态障碍物设置
+  const setStaticObstacles = useStore((s) => s.setStaticObstacles);
 
   const clone = useMemo(() => {
     const c = scene.clone();
@@ -39,36 +39,46 @@ export default function RoomBox({
       if (child instanceof THREE.Mesh) {
         child.receiveShadow = true;
         child.castShadow = true;
-      }
-    });
-    return c;
-  }, [scene]);
-
-  const floorInfo = useMemo(() => {
-    let floorBox: THREE.Box3 | null = null;
-    clone.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        if (child.name.toLowerCase().includes('floor')) {
-          floorBox = new THREE.Box3().setFromObject(child);
+        const orig = child.material as THREE.MeshStandardMaterial;
+        if (glbUrl.includes('Bathroom_downstairs') && orig.map) {
+          const m = new THREE.MeshStandardMaterial({
+            map: orig.map,
+            normalMap: orig.normalMap,
+            roughnessMap: orig.roughnessMap,
+            metalnessMap: orig.metalnessMap,
+            color: orig.color,
+            roughness: orig.roughness,
+            metalness: orig.metalness,
+          });
+          child.material = m;
         }
       }
     });
+    return c;
+  }, [scene, glbUrl]);
+
+  const floorInfo = useMemo(() => {
+    const floorMeshes: THREE.Mesh[] = [];
+    clone.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.name.toLowerCase().includes('floor')) {
+        floorMeshes.push(child);
+      }
+    });
+    const floorBox = floorMeshes.length > 0 ? new THREE.Box3().setFromObject(floorMeshes[0]) : null;
     const roomBox3 = new THREE.Box3().setFromObject(clone);
     const roomSize = new THREE.Vector3();
     roomBox3.getSize(roomSize);
+    const roomCenter = new THREE.Vector3();
+    roomBox3.getCenter(roomCenter);
 
-    const box = floorBox || roomBox3;
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
+    const floorSize = floorBox ? floorBox.getSize(new THREE.Vector3()) : null;
     const info = {
-      width: size.x,
-      depth: size.z,
+      width: floorSize ? floorSize.x : roomSize.x,
+      depth: floorSize ? floorSize.z : roomSize.z,
       height: roomSize.y,
-      cx: center.x,
-      cy: roomBox3.min.y, // 以房间底部为基准
-      cz: center.z,
+      cx: roomCenter.x,
+      cy: roomBox3.min.y,
+      cz: roomCenter.z,
     };
     log(`floorInfo computed for ${glbUrl}`, info);
     return info;
@@ -85,14 +95,11 @@ export default function RoomBox({
     if (!visible || !groupRef.current) return;
 
     groupRef.current.updateMatrixWorld(true);
-
     const obstacles: any[] = [];
 
     groupRef.current.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const name = child.name.toLowerCase();
-
-        // 过滤掉不需要产生碰撞的结构
         if (
           name.includes('floor') ||
           name.includes('wall') ||
@@ -101,15 +108,11 @@ export default function RoomBox({
         ) {
           return;
         }
-
-        // 此时的 child 已经在被移动过的 group 里了
-        // Box3.setFromObject 会自动读取世界矩阵，算出来的直接就是最终的“绝对坐标”
         const box = new THREE.Box3().setFromObject(child);
         const size = new THREE.Vector3();
         const center = new THREE.Vector3();
         box.getSize(size);
         box.getCenter(center);
-
         obstacles.push({
           id: child.name || Math.random().toString(36).substring(7),
           x: center.x,
@@ -121,14 +124,12 @@ export default function RoomBox({
         });
       }
     });
-
     setStaticObstacles(obstacles);
     log(`扫描出 ${obstacles.length} 个内置障碍物`);
   }, [clone, visible, setStaticObstacles]);
 
   return (
     <group visible={visible} rotation={roomRotation}>
-      {/* 负责视觉渲染的房间模型（被平移对齐到了世界中心） */}
       <group
         ref={groupRef}
         visible={visible}
@@ -136,8 +137,6 @@ export default function RoomBox({
       >
         <primitive object={clone} />
       </group>
-
-      {/* 负责点击检测的透明地板（在中心，且跟随外层 group 一起旋转） */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.01, 0]}

@@ -8,7 +8,7 @@ import axios, {
 
 // 创建 Axios 实例
 const request: AxiosInstance = axios.create({
-  baseURL: 'http://172.31.227.203:15000', // 统一接口前缀
+  baseURL: 'http://172.31.227.222:15000', // 统一接口前缀
   timeout: 10000, // 超时时间：10秒 (防止请求卡死)
 });
 

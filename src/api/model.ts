@@ -6,7 +6,7 @@ import request from './request'; // 引入你封装好的 Axios 实例
  * @param modelId 模型的 ID (例如: "bed_002")
  * @returns 返回 Blob 格式的二进制数据
  */
-export const fetchGlbModel = async (modelId: string) => {
+export const fetchGlbModel = async (modelId: string): Promise<Blob> => {
   const response = await request.post(
     '/load_model_glb',
     { id: modelId, type: 'model' },
@@ -18,5 +18,5 @@ export const fetchGlbModel = async (modelId: string) => {
 
   // console.log('接口返回：', response);
 
-  return response;
+  return response as unknown as Blob;
 };

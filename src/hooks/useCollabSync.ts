@@ -4,8 +4,9 @@ import collabClient from '../api/collab';
 import { CollabFurniture, PlacedFurniture } from '../types';
 import { localToWorld, worldToLocal } from '../scene/rooms';
 
-function toPlacedFurniture(cf: CollabFurniture): PlacedFurniture {
-  const localPos = worldToLocal(cf.scene || 'Guest_room', cf.pos);
+function toPlacedFurniture(cf: CollabFurniture, defaultScene: string): PlacedFurniture {
+  const scene = cf.scene || defaultScene;
+  const localPos = worldToLocal(scene, cf.pos);
   return {
     model_id: cf.prefab,
     image: '',
@@ -23,7 +24,7 @@ function toPlacedFurniture(cf: CollabFurniture): PlacedFurniture {
     isRemote: true,
     position: localPos,
     rotation: [cf.rot.x, cf.rot.y, cf.rot.z],
-    scene: cf.scene,
+    scene,
   };
 }
 
@@ -52,6 +53,7 @@ export function useCollabSync() {
       },
       onMessage: (msg) => {
         const state = useStore.getState();
+        const currentScene = state.currentScene;
 
         switch (msg.type) {
           case 'welcome':
@@ -61,22 +63,42 @@ export function useCollabSync() {
 
           case 'sync_full':
             for (const cf of msg.state) {
-              const exists = state.placedItems.some(
-                (p) => p.objectId === cf.objectId,
-              );
+              const scene = cf.scene || currentScene;
+              const exists =
+                scene === currentScene
+                  ? state.placedItems.some((p) => p.objectId === cf.objectId)
+                  : (state.savedScenes[scene] || []).some(
+                      (p) => p.objectId === cf.objectId,
+                    );
               if (!exists) {
-                state.addPlacedItem(toPlacedFurniture(cf));
+                const item = toPlacedFurniture(cf, currentScene);
+                if (scene === currentScene) {
+                  state.addPlacedItem(item);
+                } else {
+                  state.addToSavedScene(scene, item);
+                }
               }
             }
             break;
 
           case 'create_furniture':
             if (msg.from !== clientIdRef.current) {
-              const exists = state.placedItems.some(
-                (p) => p.objectId === msg.payload.objectId,
-              );
+              const scene = msg.payload.scene || currentScene;
+              const exists =
+                scene === currentScene
+                  ? state.placedItems.some(
+                      (p) => p.objectId === msg.payload.objectId,
+                    )
+                  : (state.savedScenes[scene] || []).some(
+                      (p) => p.objectId === msg.payload.objectId,
+                    );
               if (!exists) {
-                state.addPlacedItem(toPlacedFurniture(msg.payload));
+                const item = toPlacedFurniture(msg.payload, currentScene);
+                if (scene === currentScene) {
+                  state.addPlacedItem(item);
+                } else {
+                  state.addToSavedScene(scene, item);
+                }
               }
             }
             break;
@@ -87,7 +109,8 @@ export function useCollabSync() {
                 (p) => p.objectId === msg.payload.objectId,
               );
               if (localItem) {
-                const localPos = worldToLocal(localItem.scene || 'Guest_room', msg.payload.pos);
+                const scene = localItem.scene || currentScene;
+                const localPos = worldToLocal(scene, msg.payload.pos);
                 state.updateItemPosition(localItem.instanceId, localPos);
               }
             }

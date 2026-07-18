@@ -1,6 +1,7 @@
 // src/store/useStore.ts
 import { create } from 'zustand';
 import { FurnitureData, PlacedFurniture } from '../types';
+import { findValidPlacement } from '../utils/placement';
 
 export interface UserInfo {
   id: string;
@@ -76,6 +77,8 @@ interface AppState {
   setSelectedItemId: (id: string | null) => void;
   removePlacedItem: (id: string) => void;
 
+  clearSceneItems: (sceneId: string) => void; // 清空指定场景的家具
+
   // --- 房间尺寸（由 RoomBox 动态检测后设置） ---
   roomWidth: number;
   roomDepth: number;
@@ -89,6 +92,7 @@ interface AppState {
   // 存储每个房间各自保存的家具数据
   savedScenes: Record<string, PlacedFurniture[]>;
   saveCurrentScene: () => void;
+  addToSavedScene: (sceneId: string, item: PlacedFurniture) => void;
 
   // --- 协作状态 ---
   clientId: string | null;
@@ -200,11 +204,26 @@ const useStore = create<AppState>((set) => ({
       const newItem = {
         ...itemToCopy,
         instanceId: Math.random().toString(36).substring(7),
-        position: [
-          itemToCopy.position[0] + 0.6,
-          0,
-          itemToCopy.position[2] + 0.6,
-        ] as [number, number, number],
+        position: findValidPlacement(
+          itemToCopy.size || [1, 1, 1],
+          itemToCopy.position[1] >= state.roomHeight - 0.5,
+          {
+            width: state.roomWidth,
+            depth: state.roomDepth,
+            height: state.roomHeight,
+          },
+          state.placedItems
+            .filter((i) => i.instanceId !== id)
+            .map((p) => ({
+              position: p.position,
+              size: p.size || [1, 1, 1],
+              rotation: p.rotation,
+            })),
+          state.staticObstacles.map((o) => ({
+            position: [o.x, o.y, o.z] as [number, number, number],
+            size: [o.w, o.h, o.d] as [number, number, number],
+          })),
+        ) as [number, number, number],
       };
 
       // 3. 将新家具加入数组，并自动选中新家具
@@ -239,6 +258,11 @@ const useStore = create<AppState>((set) => ({
       selectedItemId: state.selectedItemId === id ? null : state.selectedItemId,
     })),
 
+  clearSceneItems: () =>
+    set(() => ({
+      placedItems: [],
+    })),
+
   // --- 房间尺寸初始值 ---
   roomWidth: 6,
   roomDepth: 6,
@@ -258,13 +282,25 @@ const useStore = create<AppState>((set) => ({
       },
     })),
 
-  // 切换房间
+  // 切换房间（自动保存当前房间的家具后再切换）
   setCurrentScene: (scene) =>
     set((state) => ({
+      savedScenes: {
+        ...state.savedScenes,
+        [state.currentScene]: [...state.placedItems],
+      },
       currentScene: scene,
-      //  如果目标房间被保存过，就恢复它；如果没有保存过，就给一个 [] 全新状态
       placedItems: state.savedScenes[scene] || [],
-      selectedItemId: null, // 切换房间时清除选中状态，防止 Bug
+      selectedItemId: null,
+    })),
+
+  // 向指定房间的已保存数据中添加家具（不切换房间）
+  addToSavedScene: (sceneId, item) =>
+    set((state) => ({
+      savedScenes: {
+        ...state.savedScenes,
+        [sceneId]: [...(state.savedScenes[sceneId] || []), item],
+      },
     })),
   // --- 协作初始值 ---
   clientId: null,

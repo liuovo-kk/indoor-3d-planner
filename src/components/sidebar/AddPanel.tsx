@@ -3,6 +3,8 @@ import { Search, ChevronDown, Loader2 } from 'lucide-react';
 import useStore from '../../store/useStore';
 import { FurnitureData } from '../../types';
 import { fetchFurnitureList } from '../../api/furniture';
+import { sendCreateFurniture } from '../../hooks/useCollabSync';
+import { findValidPlacement } from '../../utils/placement';
 
 export default function AddPanel() {
   const furnitureList = useStore((state) => state.furnitureList);
@@ -23,17 +25,40 @@ export default function AddPanel() {
         categoryName.includes('pendant')) &&
       !categoryName.includes('floor');
 
-    const startY = isCeilingItem ? 2.8 : 0;
+    // 从 store 获取当前房间状态，计算一个不碰撞的合法放置位置
+    const state = useStore.getState();
+    const position = findValidPlacement(
+      [1.0, 1.0, 1.0], // 新家具默认估算尺寸（模型尚未加载，真实尺寸后续由 AsyncModel 更新）
+      isCeilingItem,
+      {
+        width: state.roomWidth,
+        depth: state.roomDepth,
+        height: state.roomHeight,
+      },
+      state.placedItems.map((p) => ({
+        position: p.position,
+        size: p.size || [1, 1, 1],
+        rotation: p.rotation,
+      })),
+      state.staticObstacles.map((o) => ({
+        position: [o.x, o.y, o.z] as [number, number, number],
+        size: [o.w, o.h, o.d] as [number, number, number],
+      })),
+    );
+
     const newItem = {
       ...item,
       instanceId: Math.random().toString(36).substring(7),
-      position: [Math.random() - 0.5, startY, Math.random() - 0.5] as [
-        number,
-        number,
-        number,
-      ],
+      position,
     };
     addPlacedItem(newItem);
+
+    sendCreateFurniture(
+      item.model_id,
+      { x: newItem.position[0], y: newItem.position[1], z: newItem.position[2] },
+      { x: 0, y: 0, z: 0 },
+      newItem.instanceId,
+    );
 
     // 🌟 2. 新增逻辑：设置当前推荐项，并跳转 Tab
     setCurrentRecommendItem(item);

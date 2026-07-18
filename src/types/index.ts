@@ -28,6 +28,7 @@ export interface PlacedFurniture extends FurnitureData {
   objectId?: string; // 服务器端 objectId（UUID）
   ownerId?: string; // 创建者的 clientId
   isRemote?: boolean; // 是否来自远程用户
+  scene?: string; // 所属房间 ID
 }
 
 // 3. 服务端家具数据格式（用于 WebSocket 消息）
@@ -38,6 +39,7 @@ export interface CollabFurniture {
   rot: { x: number; y: number; z: number; w?: number };
   scale: { x: number; y: number; z: number };
   version: number;
+  scene?: string;
 }
 
 // 4. WebSocket 消息类型

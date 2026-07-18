@@ -9,8 +9,9 @@ import CameraRig from './CameraRig';
 import DraggableFurniture from './DraggableFurniture';
 import * as THREE from 'three';
 import RightToolbar from '../components/RightToolbar';
-import { useCollabSync } from '../hooks/useCollabSync';
-import rooms, { DEFAULT_ROOM } from './rooms';
+import { useCollabSync, sendDeleteFurniture } from '../hooks/useCollabSync';
+import rooms from './rooms';
+import EmptyRoomCanvas from './EmptyRoomCanvas';
 
 const log = (msg: string, data?: unknown) =>
   console.log(
@@ -45,9 +46,9 @@ export default function RoomScene() {
         return;
       }
 
-      // 如果按了删除键/退格键，并且有选中的家具，就删除
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItemId) {
         removePlacedItem(selectedItemId);
+        sendDeleteFurniture(selectedItemId);
       }
     };
 
@@ -68,8 +69,6 @@ export default function RoomScene() {
 
         {/* <DebugObstacles /> */}
 
-        {/* ==================== 🌟 绝对保底层 (永远秒出，绝不黑屏) ==================== */}
-        {/* 把背景色、雾效、灯光、地板、控制器全部移出 Suspense！ */}
         <color attach="background" args={['#efefef']} />
         <fog attach="fog" args={['#ececec', 20, 60]} />
 
@@ -104,18 +103,8 @@ export default function RoomScene() {
           enabled={!isDragging}
         />
 
-        {/* 主场景（默认房间 + 环境 + 家具）同一个 Suspense */}
+        {/* 环境 + 家具 */}
         <Suspense fallback={null}>
-          {rooms
-            .filter((r) => r.id === DEFAULT_ROOM)
-            .map((room) => (
-              <RoomBox
-                key={room.id}
-                glbUrl={`./assets/models/${room.glbFile}`}
-                visible={currentScene === room.id}
-                onFloorClick={() => setSelectedItemId(null)}
-              />
-            ))}
           <Environment files="./assets/indoor.hdr" />
           {placedItems.map((item) => (
             <DraggableFurniture
@@ -128,16 +117,21 @@ export default function RoomScene() {
           ))}
         </Suspense>
 
-        {/* ==================== 渲染其他独立场景 ==================== */}
+        {/* ==================== 仅渲染当前房间 ==================== */}
         {rooms
-          .filter((r) => r.id !== DEFAULT_ROOM)
+          .filter((r) => r.id === currentScene)
           .map((room) => (
             <Suspense key={room.id} fallback={null}>
-              <RoomBox
-                glbUrl={`./assets/models/${room.glbFile}`}
-                visible={currentScene === room.id}
-                onFloorClick={() => setSelectedItemId(null)}
-              />
+              {room.glbFile === 'none' ? (
+                // 拦截：如果是 AI 房间，渲染我们手写的组件
+                currentScene === room.id && <EmptyRoomCanvas />
+              ) : (
+                <RoomBox
+                  glbUrl={`./assets/models/${room.glbFile}`}
+                  visible
+                  onFloorClick={() => setSelectedItemId(null)}
+                />
+              )}
             </Suspense>
           ))}
       </Canvas>

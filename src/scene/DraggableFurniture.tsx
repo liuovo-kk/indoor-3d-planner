@@ -1,10 +1,11 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useLayoutEffect, memo } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useDrag } from '@use-gesture/react';
 import { useCursor, Edges, Line, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import useStore from '../store/useStore';
 import AsyncModel from './AsyncModel';
+import { sendDragUpdate } from '../hooks/useCollabSync';
 
 interface DraggableFurnitureProps {
   initialPosition?: [number, number, number];
@@ -13,7 +14,13 @@ interface DraggableFurnitureProps {
   model_id: string;
 }
 
-export default function DraggableFurniture({
+// ==================== 预分配对象池（模块级复用，消除 GC 压力） ====================
+const _v3_0 = new THREE.Vector3();
+const _v3_1 = new THREE.Vector3();
+const _plane = new THREE.Plane();
+const _intersection = new THREE.Vector3();
+
+function DraggableFurnitureInner({
   initialPosition = [0, 0, 0],
   rotation = [0, 0, 0],
   instanceId,
@@ -22,60 +29,69 @@ export default function DraggableFurniture({
   const groupRef = useRef<THREE.Group>(null);
   const { raycaster, camera } = useThree();
 
-  const roomWidth = useStore((state) => state.roomWidth) || 6;
-  const roomDepth = useStore((state) => state.roomDepth) || 6;
-  const roomHeight = useStore((state) => state.roomHeight) || 2.8;
-
+  // ==================== 房间尺寸 ====================
+  const roomWidth = useStore((s) => s.roomWidth) || 6;
+  const roomDepth = useStore((s) => s.roomDepth) || 6;
+  const roomHeight = useStore((s) => s.roomHeight) || 2.8;
   const halfWidth = roomWidth / 2;
   const halfDepth = roomDepth / 2;
 
+  // ==================== 轻量 UI 状态 ====================
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [hoverRotate, setHoverRotate] = useState(false); // 旋转手柄的悬浮状态
-  const [draggingRotate, setDraggingRotate] = useState(false); // 是否正在旋转
-
-  // 高度手柄的悬浮与拖拽状态
+  const [hoverRotate, setHoverRotate] = useState(false);
+  const [draggingRotate, setDraggingRotate] = useState(false);
   const [hoverHeight, setHoverHeight] = useState(false);
   const [draggingHeight, setDraggingHeight] = useState(false);
+  const [modelSize, setModelSize] = useState<[number, number, number]>([1, 1, 1]);
 
-  const [modelSize, setModelSize] = useState<[number, number, number]>([
-    1, 1, 1,
-  ]);
+  // ==================== 关键优化：用 ref 驱动拖拽，避免 React 重渲染 ====================
+  // 拖拽期间的实时位置/旋转存储在 ref 中，直接操作 Three.js 对象
+  // React state 仅用于：初始值、外部同步、拖拽结束后的距离线渲染
+  const livePosRef = useRef<[number, number, number]>([...initialPosition]);
+  const liveRotYRef = useRef<number>(rotation[1] || 0);
+  const [renderPos, setRenderPos] = useState<[number, number, number]>([...initialPosition]);
+  const [renderRotY, setRenderRotY] = useState<number>(rotation[1] || 0);
+
   const dragOffset = useRef({ x: 0, y: 0, z: 0 });
 
-  // 局部状态：分别驱动“移动”和“旋转”的丝滑渲染
-  const [livePos, setLivePos] =
-    useState<[number, number, number]>(initialPosition);
-  const [liveRotY, setLiveRotY] = useState<number>(rotation[1] || 0);
+  const isAnyDragging = dragging || draggingRotate || draggingHeight;
+  // 用 ref 追踪拖拽状态，供 useFrame 等非 React 上下文中使用
+  const isDraggingRef = useRef(false);
 
-  // 通过初始高度判断它属于哪个“物理图层”
-  const [isCeilingAnchor] = useState(
-    () => initialPosition[1] >= roomHeight - 0.5,
-  );
+  const [isCeilingAnchor] = useState(() => initialPosition[1] >= roomHeight - 0.5);
 
-  // 智能计算模型与碰撞盒的 Y 轴偏移量
-  // 1. 模型偏移：天上家具往下移动自身高度(倒挂)，地上家具不移动(坐落)
   const modelOffsetY = isCeilingAnchor ? -modelSize[1] : 0;
-  // 2. 盒子偏移：天上家具盒子中心在负半轴，地上家具盒子中心在正半轴
   const boxOffsetY = isCeilingAnchor ? -modelSize[1] / 2 : modelSize[1] / 2;
-  const myCenterY = livePos[1] + boxOffsetY;
 
-  // 当外部数据源更新时同步
+  // ==================== 初始化 group 的位置（useLayoutEffect 在 paint 前执行，无闪动） ====================
+  useLayoutEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(...initialPosition);
+      groupRef.current.rotation.set(rotation[0], rotation[1] || 0, rotation[2]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ==================== 外部数据同步（远程协作等） ====================
   useEffect(() => {
-    setLivePos(initialPosition);
-  }, [initialPosition]);
-  useEffect(() => {
-    setLiveRotY(rotation[1] || 0);
-  }, [rotation[1]]);
+    livePosRef.current = [...initialPosition];
+    liveRotYRef.current = rotation[1] || 0;
+    setRenderPos([...initialPosition]);
+    setRenderRotY(rotation[1] || 0);
+    if (groupRef.current && !isDraggingRef.current) {
+      groupRef.current.position.set(...initialPosition);
+      groupRef.current.rotation.set(rotation[0], rotation[1] || 0, rotation[2]);
+    }
+  }, [initialPosition, rotation[1]]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setIsDragging = useStore((state) => state.setIsDragging);
-  const updateItemPosition = useStore((state) => state.updateItemPosition);
-  const updateItemSize = useStore((state) => state.updateItemSize);
-  const updateItemRotation = useStore((state) => state.updateItemRotation);
-  const placedItems = useStore((state) => state.placedItems);
-  const selectedItemId = useStore((state) => state.selectedItemId);
-  const setSelectedItemId = useStore((state) => state.setSelectedItemId);
-
+  // ==================== Store 操作 ====================
+  const setIsDragging = useStore((s) => s.setIsDragging);
+  const updateItemPosition = useStore((s) => s.updateItemPosition);
+  const updateItemSize = useStore((s) => s.updateItemSize);
+  const updateItemRotation = useStore((s) => s.updateItemRotation);
+  const selectedItemId = useStore((s) => s.selectedItemId);
+  const setSelectedItemId = useStore((s) => s.setSelectedItemId);
   const isSelected = selectedItemId === instanceId;
 
   useCursor(hovered, 'grab', 'auto');
@@ -91,34 +107,147 @@ export default function DraggableFurniture({
     [instanceId, updateItemSize],
   );
 
-  const bind = useDrag(({ active, event, first }) => {
-    const staticObstacles = useStore.getState().staticObstacles;
+  // ==================== 碰撞检测工具函数 ====================
+  // 从模块级 store 和 ref 读取最新数据，不做任何订阅
+  const checkCollisionXZ = useCallback(
+    (targetX: number, targetZ: number, targetCenterY: number): boolean => {
+      const store = useStore.getState();
+      const placedItems = store.placedItems;
+      const staticObstacles = store.staticObstacles;
+      const rotY = rotation[1] || 0;
 
+      const wX =
+        Math.abs(Math.cos(rotY) * modelSize[0]) +
+        Math.abs(Math.sin(rotY) * modelSize[2]);
+      const wZ =
+        Math.abs(Math.sin(rotY) * modelSize[0]) +
+        Math.abs(Math.cos(rotY) * modelSize[2]);
+
+      // 检查动态家具
+      for (const other of placedItems) {
+        if (other.instanceId === instanceId || !other.size) continue;
+
+        const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
+        const otherBoxOffsetY = isOtherCeiling
+          ? -other.size[1] / 2
+          : other.size[1] / 2;
+        const otherCenterY = other.position[1] + otherBoxOffsetY;
+
+        const gapY = Math.abs(targetCenterY - otherCenterY);
+        if (gapY >= (modelSize[1] + other.size[1]) / 2) continue;
+
+        const oRotY = other.rotation ? other.rotation[1] : 0;
+        const oWx =
+          Math.abs(Math.cos(oRotY) * other.size[0]) +
+          Math.abs(Math.sin(oRotY) * other.size[2]);
+        const oWz =
+          Math.abs(Math.sin(oRotY) * other.size[0]) +
+          Math.abs(Math.cos(oRotY) * other.size[2]);
+
+        const gapX = Math.abs(targetX - other.position[0]);
+        const gapZ = Math.abs(targetZ - other.position[2]);
+
+        if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) return true;
+      }
+
+      // 检查静态障碍物
+      for (const obs of staticObstacles) {
+        const obsH = obs.h || roomHeight;
+        const gapY = Math.abs(targetCenterY - (obs.y || 0));
+        if (gapY >= (modelSize[1] + obsH) / 2) continue;
+
+        const gapX = Math.abs(targetX - obs.x);
+        const gapZ = Math.abs(targetZ - obs.z);
+        if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) return true;
+      }
+
+      return false;
+    },
+    [instanceId, modelSize, roomWidth, roomDepth, roomHeight, rotation],
+  );
+
+  const checkCollisionY = useCallback(
+    (targetCenterY: number): boolean => {
+      const store = useStore.getState();
+      const placedItems = store.placedItems;
+      const staticObstacles = store.staticObstacles;
+      const rotY = rotation[1] || 0;
+
+      const wX =
+        Math.abs(Math.cos(rotY) * modelSize[0]) +
+        Math.abs(Math.sin(rotY) * modelSize[2]);
+      const wZ =
+        Math.abs(Math.sin(rotY) * modelSize[0]) +
+        Math.abs(Math.cos(rotY) * modelSize[2]);
+
+      for (const other of placedItems) {
+        if (other.instanceId === instanceId || !other.size) continue;
+
+        const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
+        if (isCeilingAnchor !== isOtherCeiling) continue;
+
+        const oRotY = other.rotation ? other.rotation[1] : 0;
+        const oWx =
+          Math.abs(Math.cos(oRotY) * other.size[0]) +
+          Math.abs(Math.sin(oRotY) * other.size[2]);
+        const oWz =
+          Math.abs(Math.sin(oRotY) * other.size[0]) +
+          Math.abs(Math.cos(oRotY) * other.size[2]);
+
+        const gapX = Math.abs(livePosRef.current[0] - other.position[0]);
+        const gapZ = Math.abs(livePosRef.current[2] - other.position[2]);
+
+        if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
+          const otherBoxOffsetY = isOtherCeiling
+            ? -other.size[1] / 2
+            : other.size[1] / 2;
+          const otherCenterY = other.position[1] + otherBoxOffsetY;
+
+          const gapY = Math.abs(targetCenterY - otherCenterY);
+          if (gapY < (modelSize[1] + other.size[1]) / 2) return true;
+        }
+      }
+
+      for (const obs of staticObstacles) {
+        const gapX = Math.abs(livePosRef.current[0] - obs.x);
+        const gapZ = Math.abs(livePosRef.current[2] - obs.z);
+
+        if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
+          const obsH = obs.h || roomHeight;
+          const gapY = Math.abs(targetCenterY - (obs.y || 0));
+          if (gapY < (modelSize[1] + obsH) / 2) return true;
+        }
+      }
+
+      return false;
+    },
+    [instanceId, modelSize, roomWidth, roomDepth, roomHeight, rotation, isCeilingAnchor],
+  );
+
+  // ==================== 水平拖拽（纯 imperative） ====================
+  const bind = useDrag(({ active, event, first }) => {
     setDragging(active);
     setIsDragging(active);
+    isDraggingRef.current = active;
     event.stopPropagation();
 
     if (active && groupRef.current) {
-      // 🌟 创建动态水平拖拽面：让玻璃板永远悬浮在家具当前的高度，彻底消除透视错位
-      const horizontalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(0, livePos[1], 0),
-      );
+      // 构建水平拖拽面（位于家具当前高度），复用预分配对象
+      _v3_1.set(0, livePosRef.current[1], 0);
+      _plane.setFromNormalAndCoplanarPoint(_v3_0.set(0, 1, 0), _v3_1);
 
-      const intersection = new THREE.Vector3();
+      raycaster.ray.intersectPlane(_plane, _intersection);
 
-      raycaster.ray.intersectPlane(horizontalPlane, intersection);
-
-      if (intersection) {
+      if (_intersection) {
         if (first) {
-          dragOffset.current.x = groupRef.current.position.x - intersection.x;
-          dragOffset.current.z = groupRef.current.position.z - intersection.z;
+          dragOffset.current.x = groupRef.current.position.x - _intersection.x;
+          dragOffset.current.z = groupRef.current.position.z - _intersection.z;
         }
 
-        let targetX = intersection.x + dragOffset.current.x;
-        let targetZ = intersection.z + dragOffset.current.z;
+        let targetX = _intersection.x + dragOffset.current.x;
+        let targetZ = _intersection.z + dragOffset.current.z;
 
-        // 计算世界对齐的包围盒 (防穿模)
+        // 边界裁剪
         const rotY = rotation[1] || 0;
         const wX =
           Math.abs(Math.cos(rotY) * modelSize[0]) +
@@ -129,286 +258,134 @@ export default function DraggableFurniture({
 
         const maxBoundX = halfWidth - wX / 2;
         const maxBoundZ = halfDepth - wZ / 2;
-        const minBoundX = -(halfWidth - wX / 2);
-        const minBoundZ = -(halfDepth - wZ / 2);
 
-        targetX = THREE.MathUtils.clamp(targetX, minBoundX + 0.05, maxBoundX);
-        targetZ = THREE.MathUtils.clamp(targetZ, minBoundZ + 0.05, maxBoundZ);
+        targetX = THREE.MathUtils.clamp(targetX, -(halfWidth - wX / 2) + 0.05, maxBoundX);
+        targetZ = THREE.MathUtils.clamp(targetZ, -(halfDepth - wZ / 2) + 0.05, maxBoundZ);
 
-        let isColliding = false;
-        for (const other of placedItems) {
-          if (other.instanceId === instanceId || !other.size) continue;
+        const myCenterY = livePosRef.current[1] + boxOffsetY;
 
-          const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
-          const otherBoxOffsetY = isOtherCeiling
-            ? -other.size[1] / 2
-            : other.size[1] / 2;
-          const otherCenterY = other.position[1] + otherBoxOffsetY;
-
-          const gapY = Math.abs(myCenterY - otherCenterY);
-          const isYColliding = gapY < (modelSize[1] + other.size[1]) / 2;
-
-          // 只有当高度(Y)重叠时，才去检查水平(X,Z)是否相撞
-          if (isYColliding) {
-            const oRotY = other.rotation ? other.rotation[1] : 0;
-            const oWx =
-              Math.abs(Math.cos(oRotY) * other.size[0]) +
-              Math.abs(Math.sin(oRotY) * other.size[2]);
-            const oWz =
-              Math.abs(Math.sin(oRotY) * other.size[0]) +
-              Math.abs(Math.cos(oRotY) * other.size[2]);
-
-            const gapX = Math.abs(targetX - other.position[0]);
-            const gapZ = Math.abs(targetZ - other.position[2]);
-
-            if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
-              isColliding = true;
-              break;
-            }
-          }
-        }
-
-        if (!isColliding) {
-          for (const obs of staticObstacles) {
-            const gapY = Math.abs(myCenterY - (obs.y || 0)); // 兼容旧缓存
-            const obsH = obs.h || roomHeight;
-            const isYColliding = gapY < (modelSize[1] + obsH) / 2;
-
-            if (isYColliding) {
-              const gapX = Math.abs(targetX - obs.x);
-              const gapZ = Math.abs(targetZ - obs.z);
-              if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
-                isColliding = true;
-                break;
-              }
-            }
-          }
-        }
-
-        if (!isColliding) {
+        if (!checkCollisionXZ(targetX, targetZ, myCenterY)) {
+          // 🔑 关键优化：只更新 Three.js 对象和 ref，不触发 React 重渲染
           groupRef.current.position.x = targetX;
           groupRef.current.position.z = targetZ;
-          setLivePos([targetX, livePos[1], targetZ]);
+          livePosRef.current = [targetX, livePosRef.current[1], targetZ];
         }
       }
     } else if (!active && groupRef.current) {
+      // 拖拽结束：同步到 React state + zustand store
       const { x, y, z } = groupRef.current.position;
-      updateItemPosition(instanceId, [x, y, z]);
+      const pos: [number, number, number] = [x, y, z];
+      setRenderPos(pos);
+      updateItemPosition(instanceId, pos);
+      const placed = useStore.getState().placedItems.find((p) => p.instanceId === instanceId);
+      const objectId = placed?.objectId || instanceId;
+      sendDragUpdate(objectId, { x, y, z }, { x: 0, y: liveRotYRef.current, z: 0 });
     }
   });
 
-  // 自由旋转拖拽逻辑
+  // ==================== 旋转拖拽（纯 imperative） ====================
   const bindRotate = useDrag(({ active, event }) => {
-    event.stopPropagation(); // 阻止触发平移
+    event.stopPropagation();
     setIsDragging(active);
     setDraggingRotate(active);
+    isDraggingRef.current = active;
 
     if (active && groupRef.current) {
-      const horizontalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(0, livePos[1], 0),
-      );
-      const intersection = new THREE.Vector3();
-      raycaster.ray.intersectPlane(horizontalPlane, intersection);
+      _v3_1.set(0, livePosRef.current[1], 0);
+      _plane.setFromNormalAndCoplanarPoint(_v3_0.set(0, 1, 0), _v3_1);
 
-      if (intersection) {
-        const dx = intersection.x - groupRef.current.position.x;
-        const dz = intersection.z - groupRef.current.position.z;
-        setLiveRotY(Math.atan2(dx, dz));
+      raycaster.ray.intersectPlane(_plane, _intersection);
+
+      if (_intersection) {
+        const dx = _intersection.x - groupRef.current.position.x;
+        const dz = _intersection.z - groupRef.current.position.z;
+        const newRotY = Math.atan2(dx, dz);
+        liveRotYRef.current = newRotY;
+        // 🔑 直接操作 Three.js 对象，零 React 渲染
+        groupRef.current.rotation.y = newRotY;
       }
     } else if (!active && groupRef.current) {
-      updateItemRotation(instanceId, [rotation[0], liveRotY, rotation[2]]);
+      updateItemRotation(instanceId, [rotation[0], liveRotYRef.current, rotation[2]]);
+      setRenderRotY(liveRotYRef.current);
+      const placed = useStore.getState().placedItems.find((p) => p.instanceId === instanceId);
+      const objectId = placed?.objectId || instanceId;
+      sendDragUpdate(
+        objectId,
+        { x: livePosRef.current[0], y: livePosRef.current[1], z: livePosRef.current[2] },
+        { x: 0, y: liveRotYRef.current, z: 0 },
+      );
     }
   });
 
-  // 垂直高度升降逻辑
+  // ==================== 高度拖拽（纯 imperative） ====================
   const bindHeight = useDrag(({ active, event, first }) => {
     event.stopPropagation();
     setIsDragging(active);
     setDraggingHeight(active);
+    isDraggingRef.current = active;
 
     if (active && groupRef.current) {
-      // 创建一个永远垂直、并正对相机的隐形拖拽检测面
-      const camDir = new THREE.Vector3();
-      camera.getWorldDirection(camDir);
-      camDir.y = 0; // 抹平相机的俯仰角，只保留水平朝向
-      camDir.normalize().negate(); // 箭头指向相机
+      // 构建垂直于相机的垂直拖拽面
+      camera.getWorldDirection(_v3_0);
+      _v3_0.y = 0;
+      _v3_0.normalize().negate();
 
-      // 这个面通过家具现在的坐标
-      const verticalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-        camDir,
-        groupRef.current.position,
-      );
+      _plane.setFromNormalAndCoplanarPoint(_v3_0, groupRef.current.position);
+      raycaster.ray.intersectPlane(_plane, _intersection);
 
-      const intersection = new THREE.Vector3();
-      raycaster.ray.intersectPlane(verticalPlane, intersection);
-
-      if (intersection) {
+      if (_intersection) {
         if (first) {
-          dragOffset.current.y = groupRef.current.position.y - intersection.y;
+          dragOffset.current.y = groupRef.current.position.y - _intersection.y;
         }
 
-        let targetY = intersection.y + dragOffset.current.y;
+        let targetY = _intersection.y + dragOffset.current.y;
 
-        // 防穿模保护：家具不能陷进地下，也不能戳破天花板
+        // 边界裁剪
         const minY = isCeilingAnchor ? modelSize[1] : 0;
         const maxY = isCeilingAnchor ? roomHeight : roomHeight - modelSize[1];
         targetY = THREE.MathUtils.clamp(targetY, minY, Math.max(minY, maxY));
 
-        // 垂直方向的 3D 穿模检测
-        const rotY = rotation[1] || 0;
-        const wX =
-          Math.abs(Math.cos(rotY) * modelSize[0]) +
-          Math.abs(Math.sin(rotY) * modelSize[2]);
-        const wZ =
-          Math.abs(Math.sin(rotY) * modelSize[0]) +
-          Math.abs(Math.cos(rotY) * modelSize[2]);
-
-        // 预测未来的绝对中心点高度
         const targetCenterY = targetY + boxOffsetY;
 
-        let isColliding = false;
-
-        // 1. 检测是否会撞到其他【动态家具】
-        for (const other of placedItems) {
-          if (other.instanceId === instanceId || !other.size) continue;
-
-          const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
-          if (isCeilingAnchor !== isOtherCeiling) continue;
-
-          const oRotY = other.rotation ? other.rotation[1] : 0;
-          const oWx =
-            Math.abs(Math.cos(oRotY) * other.size[0]) +
-            Math.abs(Math.sin(oRotY) * other.size[2]);
-          const oWz =
-            Math.abs(Math.sin(oRotY) * other.size[0]) +
-            Math.abs(Math.cos(oRotY) * other.size[2]);
-
-          // 在垂直拖拽时，水平位置是固定的，先判断 X 和 Z 轴是否重叠
-          const gapX = Math.abs(livePos[0] - other.position[0]);
-          const gapZ = Math.abs(livePos[2] - other.position[2]);
-
-          if (gapX < (wX + oWx) / 2 && gapZ < (wZ + oWz) / 2) {
-            // 如果 XZ 重叠，说明它们处于正上下方的关系，此时检查未来高度是否会“撞车”
-            const otherBoxOffsetY = isOtherCeiling
-              ? -other.size[1] / 2
-              : other.size[1] / 2;
-            const otherCenterY = other.position[1] + otherBoxOffsetY;
-
-            const gapY = Math.abs(targetCenterY - otherCenterY);
-            if (gapY < (modelSize[1] + other.size[1]) / 2) {
-              isColliding = true; // 发生穿模！
-              break;
-            }
-          }
-        }
-
-        // 2. 检测是否会撞到内置【静态障碍物】（比如墙体凸起、内置衣柜）
-        if (!isColliding) {
-          const staticObstacles = useStore.getState().staticObstacles;
-          for (const obs of staticObstacles) {
-            const gapX = Math.abs(livePos[0] - obs.x);
-            const gapZ = Math.abs(livePos[2] - obs.z);
-
-            if (gapX < (wX + obs.w) / 2 && gapZ < (wZ + obs.d) / 2) {
-              const obsH = obs.h || roomHeight;
-              const gapY = Math.abs(targetCenterY - (obs.y || 0));
-
-              if (gapY < (modelSize[1] + obsH) / 2) {
-                isColliding = true;
-                break;
-              }
-            }
-          }
-        }
-
-        // 只有没撞到任何东西，才允许它上升/下降
-        if (!isColliding) {
-          setLivePos([livePos[0], targetY, livePos[2]]);
+        if (!checkCollisionY(targetCenterY)) {
+          // 🔑 只更新 Three.js 对象和 ref
+          groupRef.current.position.y = targetY;
+          livePosRef.current = [livePosRef.current[0], targetY, livePosRef.current[2]];
         }
       }
     } else if (!active && groupRef.current) {
-      // 鼠标松开，持久化高度到状态机
-      updateItemPosition(instanceId, [livePos[0], livePos[1], livePos[2]]);
+      const pos = livePosRef.current;
+      updateItemPosition(instanceId, [pos[0], pos[1], pos[2]]);
+      setRenderPos([...pos]);
+      const placed = useStore.getState().placedItems.find((p) => p.instanceId === instanceId);
+      const objectId = placed?.objectId || instanceId;
+      sendDragUpdate(
+        objectId,
+        { x: pos[0], y: pos[1], z: pos[2] },
+        { x: 0, y: liveRotYRef.current, z: 0 },
+      );
     }
   });
 
-  // 智能尺寸线距离计算 (防家具遮挡)
-  // 1. 先计算当前拖拽家具(A)的占据边界
-  const wX =
-    Math.abs(Math.cos(liveRotY) * modelSize[0]) +
-    Math.abs(Math.sin(liveRotY) * modelSize[2]);
-  const wZ =
-    Math.abs(Math.sin(liveRotY) * modelSize[0]) +
-    Math.abs(Math.cos(liveRotY) * modelSize[2]);
-
-  const aLeft = livePos[0] - wX / 2;
-  const aRight = livePos[0] + wX / 2;
-  const aBack = livePos[2] - wZ / 2;
-  const aFront = livePos[2] + wZ / 2;
-
-  let distLeft = aLeft - -halfWidth;
-  let distRight = halfWidth - aRight;
-  let distBack = aBack - -halfDepth;
-  let distFront = halfDepth - aFront;
-
-  // 3. 遍历寻找距离当前家具最近的障碍物
-  placedItems.forEach((other) => {
-    if (other.instanceId === instanceId || !other.size) return;
-
-    const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
-    const otherBoxOffsetY = isOtherCeiling
-      ? -other.size[1] / 2
-      : other.size[1] / 2;
-    const otherCenterY = other.position[1] + otherBoxOffsetY;
-
-    const gapY = Math.abs(myCenterY - otherCenterY);
-    const isYColliding = gapY < (modelSize[1] + other.size[1]) / 2;
-
-    if (!isYColliding) return; // 重点：高度不重叠直接放行！
-
-    const oRotY = other.rotation ? other.rotation[1] : 0;
-    const oWx =
-      Math.abs(Math.cos(oRotY) * other.size[0]) +
-      Math.abs(Math.sin(oRotY) * other.size[2]);
-    const oWz =
-      Math.abs(Math.sin(oRotY) * other.size[0]) +
-      Math.abs(Math.cos(oRotY) * other.size[2]);
-
-    const bLeft = other.position[0] - oWx / 2;
-    const bRight = other.position[0] + oWx / 2;
-    const bBack = other.position[2] - oWz / 2;
-    const bFront = other.position[2] + oWz / 2;
-
-    const overlapZ = bBack < aFront && bFront > aBack;
-    const overlapX = bLeft < aRight && bRight > aLeft;
-
-    if (overlapZ && bRight <= aLeft)
-      distLeft = Math.min(distLeft, aLeft - bRight);
-    if (overlapZ && bLeft >= aRight)
-      distRight = Math.min(distRight, bLeft - aRight);
-    if (overlapX && bFront <= aBack)
-      distBack = Math.min(distBack, aBack - bFront);
-    if (overlapX && bBack >= aFront)
-      distFront = Math.min(distFront, bBack - aFront);
-  });
+  // ==================== 点击选中 ====================
+  const handleClick = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      setSelectedItemId(instanceId);
+    },
+    [instanceId, setSelectedItemId],
+  );
 
   const lineY = isCeilingAnchor ? -0.1 : 0.1;
 
   return (
-    <group
-      ref={groupRef}
-      position={livePos}
-      rotation={[rotation[0], liveRotY, rotation[2]]}
-      onClick={(e) => {
-        e.stopPropagation();
-        setSelectedItemId(instanceId);
-      }}
-    >
+    <group ref={groupRef} onClick={handleClick}>
+      {/* 模型（应用 Y 轴偏移） */}
       <group position={[0, modelOffsetY, 0]}>
         <AsyncModel modelId={model_id} onLoadSize={handleModelLoad} />
       </group>
 
+      {/* 透明碰撞盒 + 拖拽手柄 */}
       <mesh
         {...(bind() as any)}
         onPointerOver={(e) => {
@@ -423,10 +400,10 @@ export default function DraggableFurniture({
         {isSelected && <Edges linewidth={1} color="white" />}
       </mesh>
 
-      {/* UI 控制手柄层  */}
+      {/* 手柄层：拖拽期间也显示（3D 对象，不影响性能） */}
       {isSelected && (
         <group>
-          {/* 旋转手柄  */}
+          {/* 旋转手柄 */}
           <group>
             <Line
               points={[
@@ -436,7 +413,6 @@ export default function DraggableFurniture({
               color="white"
               lineWidth={1.5}
             />
-            {/* 拖拽手柄圆盘 */}
             <mesh
               position={[0, lineY, modelSize[2] / 2 + 0.4]}
               {...(bindRotate() as any)}
@@ -456,7 +432,7 @@ export default function DraggableFurniture({
             </mesh>
           </group>
 
-          {/* 高度调节手柄 (正上方) */}
+          {/* 高度调节手柄 */}
           <group position={[0, boxOffsetY + modelSize[1] / 2 + 0.2, 0]}>
             <Line
               points={[
@@ -478,7 +454,6 @@ export default function DraggableFurniture({
                 setHoverHeight(false);
               }}
             >
-              {/* 向上指向的圆锥体，代表拉升 */}
               <coneGeometry args={[0.15, 0.3, 32]} />
               <meshBasicMaterial
                 color={hoverHeight || draggingHeight ? '#888888' : 'white'}
@@ -488,87 +463,151 @@ export default function DraggableFurniture({
         </group>
       )}
 
-      {/* 动态尺寸线渲染层 */}
-      {isSelected && (
-        //反向旋转抵消 liveRotY，让标尺线永远平行于房间墙壁
-        <group rotation={[0, -liveRotY, 0]}>
-          {/* 1. 左侧线 */}
-          <Line
-            points={[
-              [-wX / 2, lineY, 0],
-              [-wX / 2 - distLeft, lineY, 0],
-            ]}
-            color="#ffffff"
-            lineWidth={1.5}
-          />
-          <Html
-            position={[-wX / 2 - distLeft / 2, lineY + 0.05, 0]}
-            center
-            zIndexRange={[100, 0]}
-          >
-            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
-              {distLeft.toFixed(2)} m
-            </div>
-          </Html>
-
-          {/* 2. 右侧线 */}
-          <Line
-            points={[
-              [wX / 2, lineY, 0],
-              [wX / 2 + distRight, lineY, 0],
-            ]}
-            color="#ffffff"
-            lineWidth={1.5}
-          />
-          <Html
-            position={[wX / 2 + distRight / 2, lineY + 0.05, 0]}
-            center
-            zIndexRange={[100, 0]}
-          >
-            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
-              {distRight.toFixed(2)} m
-            </div>
-          </Html>
-
-          {/* 3. 后侧线 */}
-          <Line
-            points={[
-              [0, lineY, -wZ / 2],
-              [0, lineY, -wZ / 2 - distBack],
-            ]}
-            color="#ffffff"
-            lineWidth={1.5}
-          />
-          <Html
-            position={[0, lineY + 0.05, -wZ / 2 - distBack / 2]}
-            center
-            zIndexRange={[100, 0]}
-          >
-            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
-              {distBack.toFixed(2)} m
-            </div>
-          </Html>
-
-          {/* 4. 前侧线 */}
-          <Line
-            points={[
-              [0, lineY, wZ / 2],
-              [0, lineY, wZ / 2 + distFront],
-            ]}
-            color="#ffffff"
-            lineWidth={1.5}
-          />
-          <Html
-            position={[0, lineY + 0.05, wZ / 2 + distFront / 2]}
-            center
-            zIndexRange={[100, 0]}
-          >
-            <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
-              {distFront.toFixed(2)} m
-            </div>
-          </Html>
-        </group>
+      {/* 距离线：拖拽期间完全隐藏（消除 Html DOM overlay 的性能开销） */}
+      {isSelected && !isAnyDragging && (
+        <DistanceLinesRenderer
+          livePos={renderPos}
+          liveRotY={renderRotY}
+          modelSize={modelSize}
+          roomWidth={roomWidth}
+          roomDepth={roomDepth}
+          roomHeight={roomHeight}
+          isCeilingAnchor={isCeilingAnchor}
+          instanceId={instanceId}
+        />
       )}
     </group>
   );
 }
+
+// ==================== 距离线独立组件（React.memo 防止级联渲染） ====================
+interface DistanceLinesRendererProps {
+  livePos: [number, number, number];
+  liveRotY: number;
+  modelSize: [number, number, number];
+  roomWidth: number;
+  roomDepth: number;
+  roomHeight: number;
+  isCeilingAnchor: boolean;
+  instanceId: string;
+}
+
+const DistanceLinesRenderer = memo(function DistanceLinesRenderer({
+  livePos,
+  liveRotY,
+  modelSize,
+  roomWidth,
+  roomDepth,
+  roomHeight,
+  isCeilingAnchor,
+  instanceId,
+}: DistanceLinesRendererProps) {
+  // 仅订阅 placedItems（距离线需要遍历所有家具）
+  const placedItems = useStore((s) => s.placedItems);
+
+  const halfWidth = roomWidth / 2;
+  const halfDepth = roomDepth / 2;
+  const boxOffsetY = isCeilingAnchor ? -modelSize[1] / 2 : modelSize[1] / 2;
+  const myCenterY = livePos[1] + boxOffsetY;
+
+  const wX =
+    Math.abs(Math.cos(liveRotY) * modelSize[0]) +
+    Math.abs(Math.sin(liveRotY) * modelSize[2]);
+  const wZ =
+    Math.abs(Math.sin(liveRotY) * modelSize[0]) +
+    Math.abs(Math.cos(liveRotY) * modelSize[2]);
+
+  const aLeft = livePos[0] - wX / 2;
+  const aRight = livePos[0] + wX / 2;
+  const aBack = livePos[2] - wZ / 2;
+  const aFront = livePos[2] + wZ / 2;
+
+  let distLeft = aLeft - -halfWidth;
+  let distRight = halfWidth - aRight;
+  let distBack = aBack - -halfDepth;
+  let distFront = halfDepth - aFront;
+
+  for (const other of placedItems) {
+    if (other.instanceId === instanceId || !other.size) continue;
+
+    const isOtherCeiling = other.position[1] >= roomHeight - 0.5;
+    const otherBoxOffsetY = isOtherCeiling ? -other.size[1] / 2 : other.size[1] / 2;
+    const otherCenterY = other.position[1] + otherBoxOffsetY;
+
+    const gapY = Math.abs(myCenterY - otherCenterY);
+    if (gapY >= (modelSize[1] + other.size[1]) / 2) continue;
+
+    const oRotY = other.rotation ? other.rotation[1] : 0;
+    const oWx =
+      Math.abs(Math.cos(oRotY) * other.size[0]) +
+      Math.abs(Math.sin(oRotY) * other.size[2]);
+    const oWz =
+      Math.abs(Math.sin(oRotY) * other.size[0]) +
+      Math.abs(Math.cos(oRotY) * other.size[2]);
+
+    const bLeft = other.position[0] - oWx / 2;
+    const bRight = other.position[0] + oWx / 2;
+    const bBack = other.position[2] - oWz / 2;
+    const bFront = other.position[2] + oWz / 2;
+
+    const overlapZ = bBack < aFront && bFront > aBack;
+    const overlapX = bLeft < aRight && bRight > aLeft;
+
+    if (overlapZ && bRight <= aLeft) distLeft = Math.min(distLeft, aLeft - bRight);
+    if (overlapZ && bLeft >= aRight) distRight = Math.min(distRight, bLeft - aRight);
+    if (overlapX && bFront <= aBack) distBack = Math.min(distBack, aBack - bFront);
+    if (overlapX && bBack >= aFront) distFront = Math.min(distFront, bBack - aFront);
+  }
+
+  const lineY = isCeilingAnchor ? -0.1 : 0.1;
+
+  return (
+    <group rotation={[0, -liveRotY, 0]}>
+      {/* 左 */}
+      <Line points={[[-wX / 2, lineY, 0], [-wX / 2 - distLeft, lineY, 0]]} color="#ffffff" lineWidth={1.5} />
+      <Html position={[-wX / 2 - distLeft / 2, lineY + 0.05, 0]} center zIndexRange={[100, 0]}>
+        <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+          {distLeft.toFixed(2)} m
+        </div>
+      </Html>
+
+      {/* 右 */}
+      <Line points={[[wX / 2, lineY, 0], [wX / 2 + distRight, lineY, 0]]} color="#ffffff" lineWidth={1.5} />
+      <Html position={[wX / 2 + distRight / 2, lineY + 0.05, 0]} center zIndexRange={[100, 0]}>
+        <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+          {distRight.toFixed(2)} m
+        </div>
+      </Html>
+
+      {/* 后 */}
+      <Line points={[[0, lineY, -wZ / 2], [0, lineY, -wZ / 2 - distBack]]} color="#ffffff" lineWidth={1.5} />
+      <Html position={[0, lineY + 0.05, -wZ / 2 - distBack / 2]} center zIndexRange={[100, 0]}>
+        <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+          {distBack.toFixed(2)} m
+        </div>
+      </Html>
+
+      {/* 前 */}
+      <Line points={[[0, lineY, wZ / 2], [0, lineY, wZ / 2 + distFront]]} color="#ffffff" lineWidth={1.5} />
+      <Html position={[0, lineY + 0.05, wZ / 2 + distFront / 2]} center zIndexRange={[100, 0]}>
+        <div className="text-white text-xs font-normal pointer-events-none select-none whitespace-nowrap">
+          {distFront.toFixed(2)} m
+        </div>
+      </Html>
+    </group>
+  );
+});
+
+// ==================== 导出：memo 包裹 + 自定义比较函数 ====================
+export default memo(DraggableFurnitureInner, (prev, next) => {
+  return (
+    prev.instanceId === next.instanceId &&
+    prev.model_id === next.model_id &&
+    prev.initialPosition?.[0] === next.initialPosition?.[0] &&
+    prev.initialPosition?.[1] === next.initialPosition?.[1] &&
+    prev.initialPosition?.[2] === next.initialPosition?.[2] &&
+    prev.rotation?.[0] === next.rotation?.[0] &&
+    prev.rotation?.[1] === next.rotation?.[1] &&
+    prev.rotation?.[2] === next.rotation?.[2]
+  );
+});

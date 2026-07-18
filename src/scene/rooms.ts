@@ -46,22 +46,6 @@ const rooms: RoomConfig[] = [
     floorLabel: '一楼',
   },
   {
-    id: 'Hallway_closetA',
-    label: LABEL('Hallway_closetA'),
-    glbFile: 'Hallway_closetA.glb',
-    position: [0, 0, 2],
-    floor: '1F',
-    floorLabel: '一楼',
-  },
-  {
-    id: 'Hallway_closetB',
-    label: LABEL('Hallway_closetB'),
-    glbFile: 'Hallway_closetB.glb',
-    position: [0, 0, -2],
-    floor: '1F',
-    floorLabel: '一楼',
-  },
-  {
     id: 'Kitchen',
     label: LABEL('Kitchen'),
     glbFile: 'Kitchen.glb',
@@ -144,22 +128,6 @@ const rooms: RoomConfig[] = [
     floorLabel: '二楼',
   },
   {
-    id: 'Office_closetA',
-    label: LABEL('Office_closetA'),
-    glbFile: 'Office_closetA.glb',
-    position: [-12, 4, -4],
-    floor: '2F',
-    floorLabel: '二楼',
-  },
-  {
-    id: 'Office_closetB',
-    label: LABEL('Office_closetB'),
-    glbFile: 'Office_closetB.glb',
-    position: [-9, 3, -4],
-    floor: '2F',
-    floorLabel: '二楼',
-  },
-  {
     id: 'Office',
     label: LABEL('Office'),
     glbFile: 'Office.glb',
@@ -167,10 +135,18 @@ const rooms: RoomConfig[] = [
     floor: '2F',
     floorLabel: '二楼',
   },
+  {
+    id: 'ai_empty_room',
+    label: 'My Design',
+    glbFile: 'none',
+    position: [0, 0, 0],
+    floor: 'AI',
+    floorLabel: '实验室',
+  },
 ];
 
 export const DEFAULT_ROOM = 'Bedroom_girl';
-export const floorOrder = ['-1F', '1F', '2F'];
+export const floorOrder = ['-1F', '1F', '2F', 'AI'];
 
 export function localToWorld(
   roomId: string,
